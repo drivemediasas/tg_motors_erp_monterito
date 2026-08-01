@@ -98,7 +98,7 @@ async function createGeminiResponse({ model, maxTokens, system, tools, messages 
   };
 }
 
-// Tool definitions exposed to Claude
+// Tool definitions exposed to Gemini
 const TOOLS = [
   {
     name: 'check_availability',
@@ -236,7 +236,7 @@ const TOOLS = [
 ];
 
 /**
- * Execute a tool call requested by Claude.
+ * Execute a tool call requested by Gemini.
  * @param {object} context - datos de la conversación (ej. { telefono } del cliente real)
  */
 async function executeTool(name, input, context = {}) {
@@ -245,7 +245,7 @@ async function executeTool(name, input, context = {}) {
     if (!slots.length) {
       return 'No hay horarios disponibles en los próximos días. Por favor comunícate directamente con el taller.';
     }
-    // Format slots for Claude to relay to the user
+    // Format slots for Gemini to relay to the user
     const formatted = slots
       .slice(0, 8) // cap at 8 options
       .map(s => `- ${s.fecha} a las ${s.hora} (ID: ${s.recordId})`)
@@ -430,7 +430,7 @@ function stripMarkdown(text) {
 
 /**
  * Run one full conversation turn.
- * Handles tool-use loops internally until Claude returns a final text reply.
+ * Handles tool-use loops internally until Gemini returns a final text reply.
  *
  * @param {object} clientRecord  - from getClient / createClient
  * @param {Array}  history       - prior messages [{ role, content }]
@@ -445,7 +445,7 @@ const MAX_REPLY_TOKENS = 400;
  * Returns { reply: string, usage: { input: number, output: number } }
  */
 async function runTurn(clientRecord, history, userMessage) {
-  // Trim history to last HISTORY_MAX_MSGS messages before sending to Claude
+  // Trim history to last HISTORY_MAX_MSGS messages before sending to Gemini
   const trimmed = trimHistory(history);
 
   const messages = [
@@ -468,7 +468,7 @@ async function runTurn(clientRecord, history, userMessage) {
   let isProvider  = false; // se activa si el LLM llamó marcar_proveedor
   let isPaymentEscalation = false; // se activa si el LLM llamó escalar_pago
 
-  // Agentic loop — keep going while Claude wants to use tools
+  // Agentic loop — keep going while Gemini wants to use tools
   while (response.stop_reason === 'tool_use') {
     const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
     const toolResults = [];

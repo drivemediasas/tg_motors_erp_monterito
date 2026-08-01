@@ -1,4 +1,16 @@
 require('dotenv').config();
+
+// ── Validación de proveedor LLM al inicio ─────────────────────────────────────
+// El ÚNICO proveedor permitido es Google Gemini. Si GEMINI_API_KEY no está
+// configurada, el servidor falla en arranque con mensaje claro — nunca usa Anthropic.
+const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
+if (!GEMINI_API_KEY) {
+  console.error('[FATAL] GEMINI_API_KEY no está configurada en las variables de entorno.');
+  console.error('[FATAL] Este servidor usa ÚNICAMENTE Google Gemini. Configura GEMINI_API_KEY en Railway y redespliega.');
+  process.exit(1);
+}
+console.log(`[startup] LLM provider: Google Gemini | model: ${process.env.GEMINI_MODEL || 'gemini-2.5-flash'} | key: ${GEMINI_API_KEY.slice(0, 12)}...`);
+
 const express    = require('express');
 const path       = require('path');
 const helmet     = require('helmet');
