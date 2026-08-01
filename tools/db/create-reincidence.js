@@ -14,15 +14,7 @@ async function createReincidence({ placa, telefono, clienteNombre, tecnico,
      fechaOriginal, fechaRegreso, citaOriginalId || null, citaRegresoId || null]
   );
 
-  console.log(`[reincidencia] Detectada para ${clienteNombre} (${placa}) — ID ${rows[0].id}`);
-
-  // Alertar al dueño
-  await alertOwner({
-    clientName: clienteNombre,
-    clientPhone: telefono,
-    emergencyMessage: `REINCIDENCIA detectada — Placa: ${placa || 'N/A'}. Servicio anterior: "${trabajoOriginal}" (${fechaOriginal}). Regresa hoy ${fechaRegreso}. Verificar si es la misma falla.`,
-  }).catch(e => console.warn('[reincidencia] No se pudo alertar al dueño:', e.message));
-
+  console.log(`[reincidencia] Detectada y registrada en BD para ${clienteNombre} (${placa}) — ID ${rows[0].id}`);
   return rows[0].id;
 }
 

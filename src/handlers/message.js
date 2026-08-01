@@ -61,15 +61,10 @@ async function handleApproval(telefono) {
 }
 
 /**
- * Reenvía el mensaje de un proveedor al dueño (el bot NO le responde al proveedor).
+ * Registra el mensaje de un proveedor (el bot NO le responde al proveedor).
  */
 async function forwardProviderToOwner(phone, text) {
-  const ownerPhone = (process.env.OWNER_PHONE || '').trim();
-  if (ownerPhone) {
-    try { await sendMessage(ownerPhone, `📦 PROVEEDOR — +${phone} escribió:\n"${text}"\n\nRespóndele tú directamente.`); }
-    catch (e) { console.warn('[provider] no se pudo avisar al dueño:', e.message); }
-  }
-  console.log('[provider] forwarded to owner', { phone });
+  console.log('[provider] message recorded, owner WhatsApp notification skipped', { phone, textSnippet: text.slice(0, 50) });
 }
 
 /**

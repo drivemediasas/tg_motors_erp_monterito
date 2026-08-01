@@ -31,27 +31,42 @@ function toGeminiTools(tools) {
 
 function toGeminiContents(messages) {
   const toolNamesById = new Map();
-  return messages.map(message => {
+  const converted = messages.map(message => {
     const role = message.role === 'assistant' ? 'model' : 'user';
     if (typeof message.content === 'string') {
       return { role, parts: [{ text: message.content }] };
     }
 
-    const parts = message.content.map(block => {
-      if (block.type === 'text') return { text: block.text };
+    const parts = (Array.isArray(message.content) ? message.content : []).map(block => {
+      if (block.type === 'text') return { text: block.text || '' };
       if (block.type === 'tool_use') {
         toolNamesById.set(block.id, block.name);
         return { functionCall: { id: block.id, name: block.name, args: block.input || {} } };
       }
       if (block.type === 'tool_result') {
-        const name = toolNamesById.get(block.tool_use_id) || block.name;
+        const name = toolNamesById.get(block.tool_use_id) || block.name || 'unknown_tool';
         return { functionResponse: { id: block.tool_use_id, name, response: { result: block.content } } };
       }
       return { text: '' };
-    });
+    }).filter(p => p.text !== '' || p.functionCall || p.functionResponse);
 
-    return { role, parts };
+    return { role, parts: parts.length ? parts : [{ text: '' }] };
   });
+
+  const sanitized = [];
+  for (const item of converted) {
+    if (!sanitized.length) {
+      sanitized.push(item);
+    } else {
+      const prev = sanitized[sanitized.length - 1];
+      if (prev.role === item.role) {
+        prev.parts = [...prev.parts, ...item.parts];
+      } else {
+        sanitized.push(item);
+      }
+    }
+  }
+  return sanitized;
 }
 
 async function createGeminiResponse({ model, maxTokens, system, tools, messages }) {
@@ -377,27 +392,14 @@ async function executeTool(name, input, context = {}) {
       return 'El cliente no tiene una orden de trabajo activa. Si quiere agendar, usa check_availability y book_appointment.';
     }
     await appendServiceToOrder(orden.id, input.servicio);
-    // Avisar a Diego del extra agregado.
-    const ownerPhone = (process.env.OWNER_PHONE || '').trim();
-    if (ownerPhone) {
-      try {
-        await sendMessage(ownerPhone, `➕ Servicio extra agregado a la orden #${orden.id} — ${orden.nombre_cliente || context.nombre || 'Cliente'}: ${input.servicio}`);
-      } catch (e) { console.warn('[agregar_servicio_orden] no se pudo avisar a Diego:', e.message); }
-    }
-    console.log(`[agregar_servicio_orden] orden #${orden.id} +"${input.servicio}"`);
+    console.log(`[agregar_servicio_orden] orden #${orden.id} +"${input.servicio}" (notificación WhatsApp omitida)`);
     return `Servicio "${input.servicio}" agregado a la orden activa #${orden.id}. Confírmale al cliente que lo sumaste a su orden actual y que el equipo ya quedó notificado. No se creó una orden nueva.`;
   }
 
   if (name === 'marcar_proveedor') {
     try { await setProvider(context.telefono, true, context.nombre); }
     catch (e) { console.warn('[marcar_proveedor] no se pudo marcar:', e.message); }
-    const ownerPhone = (process.env.OWNER_PHONE || '').trim();
-    if (ownerPhone) {
-      try {
-        await sendMessage(ownerPhone, `📦 PROVEEDOR — +${context.telefono} escribió:\n"${input.mensaje}"\n\nRespóndele tú directamente.`);
-      } catch (e) { console.warn('[marcar_proveedor] no se pudo avisar al dueño:', e.message); }
-    }
-    console.log('[marcar_proveedor] marcado + reenviado al dueño:', context.telefono);
+    console.log('[marcar_proveedor] marcado en BD (notificación WhatsApp a dueño omitida):', context.telefono);
     // El caller (message.js) detecta que se marcó proveedor y NO envía respuesta al proveedor.
     return 'PROVEEDOR_MARCADO';
   }

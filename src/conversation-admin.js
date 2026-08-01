@@ -22,27 +22,42 @@ function toGeminiTools(tools) {
 
 function toGeminiContents(messages) {
   const toolNamesById = new Map();
-  return messages.map(message => {
+  const converted = messages.map(message => {
     const role = message.role === 'assistant' ? 'model' : 'user';
     if (typeof message.content === 'string') {
       return { role, parts: [{ text: message.content }] };
     }
 
-    const parts = message.content.map(block => {
-      if (block.type === 'text') return { text: block.text };
+    const parts = (Array.isArray(message.content) ? message.content : []).map(block => {
+      if (block.type === 'text') return { text: block.text || '' };
       if (block.type === 'tool_use') {
         toolNamesById.set(block.id, block.name);
         return { functionCall: { id: block.id, name: block.name, args: block.input || {} } };
       }
       if (block.type === 'tool_result') {
-        const name = toolNamesById.get(block.tool_use_id) || block.name;
+        const name = toolNamesById.get(block.tool_use_id) || block.name || 'unknown_tool';
         return { functionResponse: { id: block.tool_use_id, name, response: { result: block.content } } };
       }
       return { text: '' };
-    });
+    }).filter(p => p.text !== '' || p.functionCall || p.functionResponse);
 
-    return { role, parts };
+    return { role, parts: parts.length ? parts : [{ text: '' }] };
   });
+
+  const sanitized = [];
+  for (const item of converted) {
+    if (!sanitized.length) {
+      sanitized.push(item);
+    } else {
+      const prev = sanitized[sanitized.length - 1];
+      if (prev.role === item.role) {
+        prev.parts = [...prev.parts, ...item.parts];
+      } else {
+        sanitized.push(item);
+      }
+    }
+  }
+  return sanitized;
 }
 
 async function createGeminiResponse({ model, maxTokens, system, tools, messages }) {
