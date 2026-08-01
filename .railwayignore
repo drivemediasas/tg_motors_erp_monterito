@@ -1,0 +1,15 @@
+node_modules/
+PREFACTURAS_2025/
+PREFACTURAS_CONSOLIDADO.csv
+PREFACTURAS_DETALLADO.csv
+TALLER_AIRTABLE_IMPORT.xlsx
+TALLER_ANALISIS_TGMOTORS.xlsx
+extractor-tgmotors/
+.tmp/
+.DS_Store
+*.pdf
+*.xlsx
+*.pyc
+__pycache__/
+credentials.json
+token.json

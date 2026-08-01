@@ -1,0 +1,24 @@
+{
+  "name": "tg-motors-monterito",
+  "version": "1.0.0",
+  "description": "Monterito — TG Motors WhatsApp AI chatbot (WAT framework)",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.5.2",
+    "helmet": "^8.2.0",
+    "node-cron": "^3.0.3",
+    "pg": "^8.21.0",
+    "xlsx": "^0.18.5"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "_comment": "Copy this file and fill in values for each new client. Run: node scripts/new-client.js",
+  "SHOP_NAME": "",
+  "SHOP_CITY": "",
+  "SHOP_ADDRESS": "",
+  "SHOP_HOURS": "Lunes a Viernes 8:00-18:00, Sábados 8:00-13:00",
+  "SHOP_SERVICES": "Cambio de aceite, Inspección de frenos, Alineación, Diagnóstico de motor, Cambio de filtros, Mantenimiento general",
+  "GOOGLE_REVIEW_URL": "",
+  "AIRTABLE_API_KEY": "",
+  "AIRTABLE_BASE_ID": "",
+  "ANTHROPIC_API_KEY": "",
+  "WHATSAPP_PROVIDER": "wati",
+  "WHATSAPP_API_URL": "",
+  "WHATSAPP_API_KEY": "",
+  "WHATSAPP_PHONE_NUMBER_ID": "",
+  "WEBHOOK_VERIFY_TOKEN": "",
+  "REMINDER_TEMPLATE_NAME": ""
+}

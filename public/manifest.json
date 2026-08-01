@@ -1,0 +1,14 @@
+{
+  "name": "TG Motors ERP",
+  "short_name": "TG Motors",
+  "description": "Panel de gestión del taller",
+  "start_url": "/admin",
+  "display": "standalone",
+  "background_color": "#f0f2f5",
+  "theme_color": "#1b5e20",
+  "icons": [
+    { "src": "/img/logo-emblem.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
