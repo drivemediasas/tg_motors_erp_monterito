@@ -1,4 +1,4 @@
-const Anthropic = require('@anthropic-ai/sdk');
+const { GoogleGenAI } = require('@google/genai');
 const { buildSystemPrompt } = require('../prompts/monterito');
 const { getAvailability } = require('../tools/db/get-availability');
 const { createAppointment } = require('../tools/db/create-appointment');
@@ -16,8 +16,72 @@ const { setProvider } = require('../tools/db/mark-provider');
 const pool = require('../tools/db/client');
 const { trimHistory } = require('./guards');
 
-const client = new Anthropic({ apiKey: (process.env.ANTHROPIC_API_KEY || '').replace(/\s/g, '') });
-const MODEL = 'claude-sonnet-4-6';
+const client = new GoogleGenAI({ apiKey: (process.env.GEMINI_API_KEY || '').replace(/\s/g, '') });
+const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+
+function toGeminiTools(tools) {
+  return [{
+    functionDeclarations: tools.map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      parametersJsonSchema: tool.input_schema,
+    })),
+  }];
+}
+
+function toGeminiContents(messages) {
+  const toolNamesById = new Map();
+  return messages.map(message => {
+    const role = message.role === 'assistant' ? 'model' : 'user';
+    if (typeof message.content === 'string') {
+      return { role, parts: [{ text: message.content }] };
+    }
+
+    const parts = message.content.map(block => {
+      if (block.type === 'text') return { text: block.text };
+      if (block.type === 'tool_use') {
+        toolNamesById.set(block.id, block.name);
+        return { functionCall: { id: block.id, name: block.name, args: block.input || {} } };
+      }
+      if (block.type === 'tool_result') {
+        const name = toolNamesById.get(block.tool_use_id) || block.name;
+        return { functionResponse: { id: block.tool_use_id, name, response: { result: block.content } } };
+      }
+      return { text: '' };
+    });
+
+    return { role, parts };
+  });
+}
+
+async function createGeminiResponse({ model, maxTokens, system, tools, messages }) {
+  const response = await client.models.generateContent({
+    model,
+    contents: toGeminiContents(messages),
+    config: {
+      systemInstruction: system,
+      maxOutputTokens: maxTokens,
+      tools: toGeminiTools(tools),
+    },
+  });
+
+  return {
+    content: [
+      ...(response.text ? [{ type: 'text', text: response.text }] : []),
+      ...((response.functionCalls || []).map(call => ({
+        type: 'tool_use',
+        id: call.id || `${call.name}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        name: call.name,
+        input: call.args || {},
+      }))),
+    ],
+    stop_reason: response.functionCalls?.length ? 'tool_use' : 'end_turn',
+    usage: {
+      input_tokens: response.usageMetadata?.promptTokenCount || 0,
+      output_tokens: response.usageMetadata?.candidatesTokenCount || 0,
+    },
+  };
+}
 
 // Tool definitions exposed to Claude
 const TOOLS = [
@@ -389,9 +453,9 @@ async function runTurn(clientRecord, history, userMessage) {
 
   const systemPrompt = buildSystemPrompt(clientRecord);
 
-  let response = await client.messages.create({
+  let response = await createGeminiResponse({
     model: MODEL,
-    max_tokens: MAX_REPLY_TOKENS,
+    maxTokens: MAX_REPLY_TOKENS,
     system: systemPrompt,
     tools: TOOLS,
     messages,
@@ -427,9 +491,9 @@ async function runTurn(clientRecord, history, userMessage) {
     messages.push({ role: 'assistant', content: response.content });
     messages.push({ role: 'user', content: toolResults });
 
-    response = await client.messages.create({
+    response = await createGeminiResponse({
       model: MODEL,
-      max_tokens: MAX_REPLY_TOKENS,
+      maxTokens: MAX_REPLY_TOKENS,
       system: systemPrompt,
       tools: TOOLS,
       messages,
