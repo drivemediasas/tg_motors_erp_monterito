@@ -23,7 +23,7 @@ async function alertOwner({ clientName, clientPhone, emergencyMessage }) {
     `"${emergencyMessage}"\n\n` +
     `Responde a este número directamente por WhatsApp.`;
 
-  await sendMessage(ownerPhone, message);
+  await sendMessage(ownerPhone, message, { ownerAlert: true });
   console.log(`[alert-owner] Alert sent to ${ownerName} (${ownerPhone}) for client ${clientPhone}`);
 
   return { success: true, ownerPhone };

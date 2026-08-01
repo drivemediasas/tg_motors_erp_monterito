@@ -8,8 +8,16 @@ const d360Service = require('./360dialog-service');
  *
  * @param {string} to      - recipient phone number (international format, no +)
  * @param {string} message - text to send
+ * @param {object} [opts]
+ * @param {boolean} [opts.ownerAlert] - required true to message OWNER_PHONE (critical alerts only)
  */
-async function sendMessage(to, message) {
+async function sendMessage(to, message, opts = {}) {
+  const ownerPhone = (process.env.OWNER_PHONE || '').trim();
+  if (ownerPhone && to === ownerPhone && !opts.ownerAlert) {
+    console.warn('[send-message] blocked send to OWNER_PHONE — not an explicit critical alert');
+    return null;
+  }
+
   const provider = process.env.WHATSAPP_PROVIDER || 'wati';
 
   if (provider === 'wati') {

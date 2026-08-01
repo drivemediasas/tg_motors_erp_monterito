@@ -1,5 +1,4 @@
 const pool = require('./client');
-const { alertOwner } = require('../whatsapp/alert-owner');
 
 async function createReincidence({ placa, telefono, clienteNombre, tecnico,
   trabajoOriginal, fechaOriginal, fechaRegreso, citaOriginalId, citaRegresoId }) {

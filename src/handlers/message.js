@@ -245,7 +245,7 @@ async function handleAdminMessage(phone, text, sendFn, meta = {}) {
 /**
  * Punto de entrada: serializa por teléfono (mismo wa_id → en orden; números
  * distintos → en paralelo). Evita race condition sobre el historial.
- * Envuelto en SAFE MODE: ante cualquier error → pausa humano, no responde, avisa.
+ * Envuelto en SAFE MODE: ante cualquier error → pausa humano, loguea, no notifica al dueño.
  */
 async function processMessage(phone, text, sendFn, meta = {}) {
   return withLock(phone, async () => {
