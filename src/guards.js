@@ -232,6 +232,11 @@ function getStaticResponse(text) {
   if (!_cacheBuilt) { _buildStaticCache(); _cacheBuilt = true; }
   const direct = String(text || '').trim().toLowerCase();
   if (_staticCache.has(direct)) return _staticCache.get(direct) || null;
+  // Solo para mensajes CORTOS y directos ("cuál es su horario", "servicios").
+  // En una frase larga ("necesito un servicio de mantenimiento y arreglar la chapa…")
+  // la palabra suelta NO debe disparar el enlatado: eso lo maneja el LLM.
+  const wordCount = direct.split(/\s+/).filter(Boolean).length;
+  if (wordCount > 5 || direct.length > 40) return null;
   for (const { key, re } of STATIC_PATTERNS) {
     if (re.test(text)) return _staticCache.get(key) || null;
   }

@@ -145,12 +145,19 @@ async function handleQuickReply(phone, text, opts = {}) {
     if (norm === '5') return replyAgendar(phone);
   }
 
-  // Coincidencias por palabra explícita — seguras en cualquier contexto
-  if (/\bhorario\b/i.test(norm)) return replyHorario();
-  if (/\b(direccion|ubicacion)\b/i.test(norm)) return replyDireccion();
-  if (/\bservicios?\b/i.test(norm)) return replyServicios();
+  // El fast-path por palabra clave solo aplica a mensajes CORTOS y directos.
+  // Una frase larga ("necesito un servicio de mantenimiento y arreglar la chapa…"
+  // o "hola quiero agendar para el lunes mi kia") la maneja el LLM.
+  const wordCount = norm.split(/\s+/).filter(Boolean).length;
+  const isShort = wordCount <= 6 && t.length <= 45;
 
-  const isGreeting = /\b(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|hello|hi)\b/i.test(t);
+  if (isShort) {
+    if (/\bhorario\b/i.test(norm)) return replyHorario();
+    if (/\b(direccion|ubicacion)\b/i.test(norm)) return replyDireccion();
+    if (/\bservicios?\b/i.test(norm)) return replyServicios();
+  }
+
+  const isGreeting = isShort && /\b(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|hello|hi)\b/i.test(t);
   if (isGreeting) {
     const name = (await getClient(phone))?.nombre?.split(' ')[0] || 'hola';
     return `${buildMainMenu(name)}\n\nDime qué necesitas y te ayudo de una.`;
