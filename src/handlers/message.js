@@ -159,10 +159,9 @@ async function handleQuickReply(phone, text, opts = {}) {
   const cached = getStaticResponse(t);
   if (cached) return cached;
 
-  if (/\b(precio|cu[aá]nto|c[uú]esta|cobran|cobras|valor)\b/i.test(norm)) {
-    return replyPrecio();
-  }
-
+  // Las preguntas de precio en texto libre ("¿cuánto cuesta X?") van al LLM:
+  // así usa precio_servicio (precio estándar) o consultar_precio (escala al equipo)
+  // según el caso. El fast-path solo resuelve el "4" del menú.
   return null;
 }
 
@@ -620,4 +619,4 @@ async function processMessageInner(phone, text, sendFn, meta = {}) {
   });
 }
 
-module.exports = { processMessage, handleQuickReply, menuJustShown };
+module.exports = { processMessage, handleQuickReply, menuJustShown, buildMainMenu, PAYMENT_ISSUE_RE };

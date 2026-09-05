@@ -93,8 +93,9 @@ function isOffTopicQuery(text) {
 // ─── Prompt injection detection ───────────────────────────────────────────────
 
 const INJECTION_RE = [
-  /ignora (todas? )?(las )?(instrucciones|reglas|restricciones)/i,
-  /olvida (las? )?(tus? )?(instrucciones|reglas|restricciones|todo)/i,
+  /ignor[ae] (todas? |tus? |las |mis )?(instrucciones|reglas|restricciones|indicaciones|el prompt)/i,
+  /olvida (las? |tus? |mis )?(instrucciones|reglas|restricciones|todo)/i,
+  /d(?:i|a)me (tu |el |cu[aá]l es tu )?(prompt|system prompt|instrucciones|configuraci[oó]n)/i,
   /act[uú]a como/i,
   /eres (ahora )?(chatgpt|gpt|una? (ia|inteligencia artificial)|un modelo|asistente diferente)/i,
   /mu[eé]strame (tu )?(prompt|system prompt|instrucciones internas|configuraci[oó]n)/i,
