@@ -8,7 +8,7 @@ if (!GROQ_API_KEY) {
   console.error('[FATAL] Configura GROQ_API_KEY en Railway y redespliega.');
   process.exit(1);
 }
-console.log(`[startup] LLM provider: Groq | model: ${process.env.GROQ_MODEL || 'moonshotai/kimi-k2-instruct'} | key: ${GROQ_API_KEY.slice(0, 12)}...`);
+console.log(`[startup] LLM provider: Groq | model: ${process.env.GROQ_MODEL || 'llama-3.3-70b-versatile'} | key: ${GROQ_API_KEY.slice(0, 12)}...`);
 
 const express    = require('express');
 const path       = require('path');

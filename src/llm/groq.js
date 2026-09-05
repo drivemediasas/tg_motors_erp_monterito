@@ -1,8 +1,10 @@
 const { bump } = require('../metrics');
 
 const GROQ_API_KEY = (process.env.GROQ_API_KEY || '').replace(/\s/g, '');
-const GROQ_MODEL = process.env.GROQ_MODEL || 'moonshotai/kimi-k2-instruct';
-const GROQ_FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || 'llama-3.3-70b-versatile';
+// llama-3.3-70b-versatile: disponible en free tier, buen español y tool-use.
+// (moonshotai/kimi-k2-instruct fue dado de baja por Groq → model_not_found.)
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+const GROQ_FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || 'llama-3.1-8b-instant';
 const GROQ_BASE_URL = process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1';
 const GROQ_TIMEOUT_MS = parseInt(process.env.GROQ_TIMEOUT_MS || '20000', 10);
 

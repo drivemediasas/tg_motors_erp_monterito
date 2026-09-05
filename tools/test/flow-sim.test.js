@@ -95,6 +95,14 @@ async function test(name, fn) {
     const r = await botTurn(freshConvo(), 'servicios');
     assert.strictEqual(r.via, 'quick-reply', r.via);
   });
+  await test('regresión  "Precio de un servicio" → LLM (es intención de precio, no lista)', async () => {
+    const r = await botTurn(freshConvo(), 'Precio de un servicio');
+    assert.strictEqual(r.via, 'LLM', `${r.via}: ${r.reply}`);
+  });
+  await test('regresión  "Cambio de aceite" (nombre de servicio suelto) → LLM', async () => {
+    const r = await botTurn(freshConvo(), 'Cambio de aceite');
+    assert.strictEqual(r.via, 'LLM', `${r.via}: ${r.reply}`);
+  });
 
   // ── C5: un "2" que responde a otra pregunta NO da la dirección ────────────
   await test('C5  "2" respondiendo a "¿1 o 2 puertas?" → LLM (no dirección)', async () => {

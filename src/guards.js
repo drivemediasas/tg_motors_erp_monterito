@@ -228,15 +228,16 @@ let _cacheBuilt = false;
 // Nota: un dígito suelto ("1".."5") NO se mapea aquí. La selección numérica de menú
 // se resuelve en handleQuickReply (message.js) y solo cuando el bot acaba de mostrar
 // el menú — así un "2" que responde a otra pregunta no dispara la dirección.
+const _OTHER_INTENT_RE = /\b(precio|costo|cuesta|cu[aá]nto|cotiz|agend|cita|reserv|turno|manteni|arregl|revis|diagn|da[ñn]|falla|ruido|chapa|puerta|aceite|freno|llanta|motor)\b/i;
+
 function getStaticResponse(text) {
   if (!_cacheBuilt) { _buildStaticCache(); _cacheBuilt = true; }
   const direct = String(text || '').trim().toLowerCase();
   if (_staticCache.has(direct)) return _staticCache.get(direct) || null;
-  // Solo para mensajes CORTOS y directos ("cuál es su horario", "servicios").
-  // En una frase larga ("necesito un servicio de mantenimiento y arreglar la chapa…")
-  // la palabra suelta NO debe disparar el enlatado: eso lo maneja el LLM.
+  // Solo para mensajes MUY cortos y directos ("servicios", "cuál es su horario").
+  // Una frase larga o con otra intención (precio, agendar, arreglar algo) → LLM.
   const wordCount = direct.split(/\s+/).filter(Boolean).length;
-  if (wordCount > 5 || direct.length > 40) return null;
+  if (wordCount > 4 || direct.length > 32 || _OTHER_INTENT_RE.test(direct)) return null;
   for (const { key, re } of STATIC_PATTERNS) {
     if (re.test(text)) return _staticCache.get(key) || null;
   }

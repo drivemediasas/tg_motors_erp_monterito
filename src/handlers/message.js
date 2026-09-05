@@ -145,19 +145,20 @@ async function handleQuickReply(phone, text, opts = {}) {
     if (norm === '5') return replyAgendar(phone);
   }
 
-  // El fast-path por palabra clave solo aplica a mensajes CORTOS y directos.
-  // Una frase larga ("necesito un servicio de mantenimiento y arreglar la chapa…"
-  // o "hola quiero agendar para el lunes mi kia") la maneja el LLM.
+  // El fast-path por palabra clave solo aplica a mensajes MUY cortos y directos
+  // ("horario", "servicios", "dónde quedan"). Cualquier frase más larga, o que
+  // mezcle otra intención (precio, agendar, cita), la maneja el LLM.
   const wordCount = norm.split(/\s+/).filter(Boolean).length;
-  const isShort = wordCount <= 6 && t.length <= 45;
+  const hasOtherIntent = /\b(precio|costo|cuesta|cuanto|cotiz|agend|cita|reserv|turno|manteni|arregl|revis|diagn|dañ|falla|ruido|chapa|puerta|aceite|freno|llanta|motor)\b/i.test(norm);
+  const isShort = wordCount <= 4 && t.length <= 32 && !hasOtherIntent;
 
   if (isShort) {
-    if (/\bhorario\b/i.test(norm)) return replyHorario();
-    if (/\b(direccion|ubicacion)\b/i.test(norm)) return replyDireccion();
+    if (/\bhorario\b/i.test(norm) || /\b(a )?qu[eé] hora\b/i.test(norm)) return replyHorario();
+    if (/\b(direccion|ubicacion|donde (estan|quedan|queda))\b/i.test(norm)) return replyDireccion();
     if (/\bservicios?\b/i.test(norm)) return replyServicios();
   }
 
-  const isGreeting = isShort && /\b(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|hello|hi)\b/i.test(t);
+  const isGreeting = wordCount <= 3 && /^(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|hey|hello|hi|ola)\b/i.test(norm);
   if (isGreeting) {
     const name = (await getClient(phone))?.nombre?.split(' ')[0] || 'hola';
     return `${buildMainMenu(name)}\n\nDime qué necesitas y te ayudo de una.`;
