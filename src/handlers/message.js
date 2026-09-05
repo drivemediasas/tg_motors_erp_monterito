@@ -27,6 +27,29 @@ const {
   recordTokenUsage,
   logBlock,
 } = require('../guards');
+const { getPrecioEstandar } = require('../../tools/db/precios-estandar');
+
+function isLLMTransientError(err) {
+  const msg = String(err?.message || err || '');
+  return /quota exceeded|resource_exhausted|429|rate limits|free_tier_requests|Groq API error|fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout/i.test(msg);
+}
+
+function makeFallbackReply(text) {
+  const t = String(text || '').toLowerCase();
+  if (/\b(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches)\b/i.test(t)) {
+    return 'Hola 👋 Gracias por escribir a TG Motors. Cuéntame qué necesitas y te ayudo con horario, servicios, agendado o precios.';
+  }
+  if (/\b(horario|abren|cierran|atienden)\b/i.test(t)) {
+    return `Nuestro horario de atención es: ${process.env.SHOP_HOURS || 'Lunes a Viernes 8:30-17:30, Sábados 9:00-16:00'}. ¿Deseas agendar una cita?`;
+  }
+  if (/\b(agendar|cita|reservar|turno)\b/i.test(t)) {
+    return 'Perfecto, te ayudo a agendar. Envíame por favor el servicio que necesitas, la fecha preferida y la hora aproximada.';
+  }
+  if (/\b(precio|cu[aá]nto|c[uú]esta|cobran|valor)\b/i.test(t)) {
+    return 'Para darte el precio exacto necesito revisar tu vehículo o el servicio específico. Envíame marca, modelo y año, y te ayudo enseguida.';
+  }
+  return 'Te leo. Cuéntame qué necesita tu vehículo o qué te gustaría agendar y te ayudo enseguida.';
+}
 
 function parsePayload(body) {
   if (body.waId || body.whatsappNumber) {
@@ -37,9 +60,100 @@ function parsePayload(body) {
   }
   if (body.entry) {
     const msg = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    if (msg) return { from: msg.from, text: msg.text?.body || '' };
+    if (msg) {
+      return {
+        from: msg.from,
+        text: msg.text?.body || '',
+        messageId: msg.id || null,
+        quotedId: msg.context?.id || null,
+      };
+    }
   }
   return null;
+}
+
+function normalizePhone(phone) {
+  return String(phone || '').replace(/\D/g, '');
+}
+
+function getAdminPhones() {
+  const raw = [
+    process.env.ADMIN_PHONE || '',
+    process.env.ADMIN_PHONE_1 || '',
+    process.env.ADMIN_PHONE_2 || '',
+    '593999648041',
+    '0999648041',
+  ].filter(Boolean);
+  return new Set(raw.map(normalizePhone).filter(Boolean));
+}
+
+async function handleQuickReply(phone, text, sendFn) {
+  const t = String(text || '').trim();
+  const norm = t.toLowerCase();
+  if (!t) return false;
+
+  const isGreeting = /\b(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|hello|hi)\b/i.test(t);
+  if (isGreeting) {
+    const name = (await getClient(phone))?.nombre?.split(' ')[0] || 'hola';
+    const shopName = process.env.SHOP_NAME || 'TG Motors';
+    const shopHours = process.env.SHOP_HOURS || 'Lunes a Viernes 8:30-17:30, Sábados 9:00-16:00';
+    await sendFn(
+      `Hola ${name} 👋 Soy Monterito, asistente de ${shopName}.\n\n` +
+      `Puedo ayudarte con:\n` +
+      `• Horario\n` +
+      `• Dirección\n` +
+      `• Servicios\n` +
+      `• Precio de un servicio\n` +
+      `• Agendar una cita\n\n` +
+      `Horario: ${shopHours}\n\n` +
+      `Dime qué necesitas y te ayudo de una.`
+    );
+    return true;
+  }
+
+  const cached = getStaticResponse(t);
+  if (cached) {
+    await sendFn(cached);
+    return true;
+  }
+
+  if (/\b(agendar|cita|reservar|turno|agenda)\b/i.test(norm)) {
+    const client = await getClient(phone);
+    const name = client?.nombre?.split(' ')[0] || 'hola';
+    const hasVehicle = !!(client?.marca || client?.modelo || client?.anio || client?.placa);
+    const vehicleText = hasVehicle
+      ? `Veo que registraste un vehículo: ${[client.marca, client.modelo, client.anio].filter(Boolean).join(' ')}${client.placa ? `, placa ${client.placa}` : ''}.`
+      : 'Aún no tengo tus datos de vehículo.';
+
+    await sendFn(
+      `Perfecto ${name} 👌 vamos a agendar tu cita.\n\n` +
+      `${vehicleText}\n\n` +
+      `Envíame por favor:\n` +
+      `• El servicio que necesitas\n` +
+      `• La fecha que prefieres\n` +
+      `• La hora aproximada\n\n` +
+      `Si no sabes qué servicio poner, dime tu problema y yo te ayudo.`
+    );
+    return true;
+  }
+
+  if (/\b(precio|cu[aá]nto|c[uú]esta|cobran|cobras|valor)\b/i.test(norm)) {
+    const price = await getPrecioEstandar('cambio de aceite');
+    if (price) {
+      await sendFn(
+        `El precio estándar de ${price.servicio} es $${parseFloat(price.precio).toFixed(2)}${price.nota ? ` (${price.nota})` : ''}.\n\n` +
+        `Si quieres, te ayudo también con horario, servicios o una cita.`
+      );
+      return true;
+    }
+    await sendFn(
+      'Para darte el precio exacto necesito revisar tu vehículo o el servicio específico.\n\n' +
+      'Envíame la marca, modelo y año, y te ayudo enseguida.'
+    );
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -253,7 +367,16 @@ async function processMessage(phone, text, sendFn, meta = {}) {
       return await processMessageInner(phone, text, sendFn, meta);
     } catch (err) {
       console.error('[processMessage] error:', err.message);
-      await enterSafeMode(phone, err, { reason: 'process_exception' });
+      try {
+        await sendFn(makeFallbackReply(text));
+      } catch (sendErr) {
+        console.error('[processMessage] fallback send failed:', sendErr.message);
+      }
+      if (!isLLMTransientError(err)) {
+        await enterSafeMode(phone, err, { reason: 'process_exception' });
+      } else {
+        console.warn('[processMessage] LLM transient error; fallback reply sent without SAFE_MODE');
+      }
     }
   });
 }
@@ -264,25 +387,56 @@ async function processMessage(phone, text, sendFn, meta = {}) {
  * por el canal correspondiente (Twilio/WATI/Meta o respond.io).
  */
 async function processMessageInner(phone, text, sendFn, meta = {}) {
-  const excludedPhone = (process.env.EXCLUDED_PHONE || '').trim();
-  if (excludedPhone && phone === excludedPhone) {
-    console.log(`[excluded] Ignoring message from ${phone}`);
-    return;
-  }
-
   const textNorm = text.trim().toLowerCase();
   console.log(`[inbound] ${phone}: ${text.slice(0, 120)}`);
 
-  // Admin mode: owner bypasses all guards — they need full ERP access
-  const ownerPhone = (process.env.OWNER_PHONE || '').trim();
-  if (ownerPhone && phone === ownerPhone) {
+  const incomingPhone = normalizePhone(phone);
+  const adminPhones = getAdminPhones();
+
+  // Admin de pruebas: bypass total para validar el bot sin quedar atrapado en HUMAN.
+  if (adminPhones.has(incomingPhone)) {
+    // Si quedó con estado humano/pausa, lo regresamos a BOT para pruebas.
+    await setConversationState(phone, {
+      owner_type: 'BOT',
+      owner_id: null,
+      conversation_mode: 'BOT',
+      last_owner_change: new Date().toISOString(),
+      last_human_activity: null,
+    }).catch(() => {});
+    const quick = await handleQuickReply(phone, text, sendFn);
+    if (quick) return;
+    console.log('[admin-test] bypass', { phone: incomingPhone });
     return handleAdminMessage(phone, text, sendFn, meta);
+  }
+
+  // Admin mode: owner bypasses all guards — they need full ERP access
+  const ownerPhone = normalizePhone(process.env.OWNER_PHONE);
+  if (ownerPhone && incomingPhone === ownerPhone) {
+    return handleAdminMessage(phone, text, sendFn, meta);
+  }
+
+  // Fast path for very common questions: avoids Gemini/tool failures entirely.
+  if (await handleQuickReply(phone, text, sendFn)) {
+    return;
   }
 
   // ── Conversation Control Layer ───────────────────────────────────────────────
   // ÚNICA decisión de si el bot responde. El LLM nunca decide esto.
   const state = await getConversationState(phone);
   const nowMs = Date.now();
+
+  // Un estado dejado por error técnico no debe bloquear al cliente real.
+  // SYSTEM = safe mode técnico; lo soltamos apenas el cliente vuelva a escribir.
+  if (state.owner_type === 'HUMAN' && state.owner_id === 'SYSTEM') {
+    await releaseToBot(phone, 'BOT').catch(() => {});
+    state.owner_type = 'BOT';
+    state.owner_id = null;
+    state.conversation_mode = 'BOT';
+    state.last_owner_change = new Date().toISOString();
+    state.last_human_activity = null;
+    console.log('[CONTROL] system_handoff reset → BOT', { phone });
+  }
+
   const ctrl = shouldBotRespond({
     safeMode: false,
     isDuplicate: false, // el dedup durable ya filtró antes de llegar aquí
@@ -419,7 +573,12 @@ async function handleInbound(body) {
   console.log('[webhook] parsed:', JSON.stringify(parsed));
   if (!parsed || !parsed.text) return;
 
-  await processMessage(parsed.from, parsed.text, (msg) => sendMessage(parsed.from, msg));
+  await processMessage(
+    parsed.from,
+    parsed.text,
+    (msg) => sendMessage(parsed.from, msg),
+    { messageId: parsed.messageId || null, quotedId: parsed.quotedId || null }
+  );
 }
 
 module.exports = { handleInbound, processMessage };

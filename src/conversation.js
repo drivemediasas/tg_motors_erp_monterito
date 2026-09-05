@@ -1,4 +1,3 @@
-const { GoogleGenAI } = require('@google/genai');
 const { buildSystemPrompt } = require('../prompts/monterito');
 const { getAvailability } = require('../tools/db/get-availability');
 const { createAppointment } = require('../tools/db/create-appointment');
@@ -15,90 +14,9 @@ const { takeOverByHuman } = require('../tools/db/conversation-state');
 const { setProvider } = require('../tools/db/mark-provider');
 const pool = require('../tools/db/client');
 const { trimHistory } = require('./guards');
+const { runGroqChat } = require('./llm/groq');
 
-const client = new GoogleGenAI({ apiKey: (process.env.GEMINI_API_KEY || '').replace(/\s/g, '') });
-const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-
-function toGeminiTools(tools) {
-  return [{
-    functionDeclarations: tools.map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      parametersJsonSchema: tool.input_schema,
-    })),
-  }];
-}
-
-function toGeminiContents(messages) {
-  const toolNamesById = new Map();
-  const converted = messages.map(message => {
-    const role = message.role === 'assistant' ? 'model' : 'user';
-    if (typeof message.content === 'string') {
-      return { role, parts: [{ text: message.content }] };
-    }
-
-    const parts = (Array.isArray(message.content) ? message.content : []).map(block => {
-      if (block.type === 'text') return { text: block.text || '' };
-      if (block.type === 'tool_use') {
-        toolNamesById.set(block.id, block.name);
-        return { functionCall: { id: block.id, name: block.name, args: block.input || {} } };
-      }
-      if (block.type === 'tool_result') {
-        const name = toolNamesById.get(block.tool_use_id) || block.name || 'unknown_tool';
-        return { functionResponse: { id: block.tool_use_id, name, response: { result: block.content } } };
-      }
-      return { text: '' };
-    }).filter(p => p.text !== '' || p.functionCall || p.functionResponse);
-
-    return { role, parts: parts.length ? parts : [{ text: '' }] };
-  });
-
-  const sanitized = [];
-  for (const item of converted) {
-    if (!sanitized.length) {
-      sanitized.push(item);
-    } else {
-      const prev = sanitized[sanitized.length - 1];
-      if (prev.role === item.role) {
-        prev.parts = [...prev.parts, ...item.parts];
-      } else {
-        sanitized.push(item);
-      }
-    }
-  }
-  return sanitized;
-}
-
-async function createGeminiResponse({ model, maxTokens, system, tools, messages }) {
-  const response = await client.models.generateContent({
-    model,
-    contents: toGeminiContents(messages),
-    config: {
-      systemInstruction: system,
-      maxOutputTokens: maxTokens,
-      tools: toGeminiTools(tools),
-    },
-  });
-
-  return {
-    content: [
-      ...(response.text ? [{ type: 'text', text: response.text }] : []),
-      ...((response.functionCalls || []).map(call => ({
-        type: 'tool_use',
-        id: call.id || `${call.name}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        name: call.name,
-        input: call.args || {},
-      }))),
-    ],
-    stop_reason: response.functionCalls?.length ? 'tool_use' : 'end_turn',
-    usage: {
-      input_tokens: response.usageMetadata?.promptTokenCount || 0,
-      output_tokens: response.usageMetadata?.candidatesTokenCount || 0,
-    },
-  };
-}
-
-// Tool definitions exposed to Gemini
+// Tool definitions exposed to the LLM
 const TOOLS = [
   {
     name: 'check_availability',
@@ -236,7 +154,7 @@ const TOOLS = [
 ];
 
 /**
- * Execute a tool call requested by Gemini.
+ * Execute a tool call requested by the LLM.
  * @param {object} context - datos de la conversación (ej. { telefono } del cliente real)
  */
 async function executeTool(name, input, context = {}) {
@@ -245,7 +163,7 @@ async function executeTool(name, input, context = {}) {
     if (!slots.length) {
       return 'No hay horarios disponibles en los próximos días. Por favor comunícate directamente con el taller.';
     }
-    // Format slots for Gemini to relay to the user
+    // Format slots for the LLM to relay to the user
     const formatted = slots
       .slice(0, 8) // cap at 8 options
       .map(s => `- ${s.fecha} a las ${s.hora} (ID: ${s.recordId})`)
@@ -430,22 +348,21 @@ function stripMarkdown(text) {
 
 /**
  * Run one full conversation turn.
- * Handles tool-use loops internally until Gemini returns a final text reply.
+ * Handles tool-use loops internally until the LLM returns a final text reply.
  *
  * @param {object} clientRecord  - from getClient / createClient
  * @param {Array}  history       - prior messages [{ role, content }]
  * @param {string} userMessage   - the new inbound text
  * @returns {string} Monterito's final reply
  */
-// Max output tokens ≈ 250 words in Spanish (~325 tokens; 400 gives headroom for tool calls)
-const MAX_REPLY_TOKENS = 400;
+const MAX_REPLY_TOKENS = 700;
 
 /**
  * Run one full conversation turn.
  * Returns { reply: string, usage: { input: number, output: number } }
  */
 async function runTurn(clientRecord, history, userMessage) {
-  // Trim history to last HISTORY_MAX_MSGS messages before sending to Gemini
+  // Trim history to last HISTORY_MAX_MSGS messages before sending to the LLM
   const trimmed = trimHistory(history);
 
   const messages = [
@@ -455,8 +372,7 @@ async function runTurn(clientRecord, history, userMessage) {
 
   const systemPrompt = buildSystemPrompt(clientRecord);
 
-  let response = await createGeminiResponse({
-    model: MODEL,
+  let response = await runGroqChat({
     maxTokens: MAX_REPLY_TOKENS,
     system: systemPrompt,
     tools: TOOLS,
@@ -468,7 +384,7 @@ async function runTurn(clientRecord, history, userMessage) {
   let isProvider  = false; // se activa si el LLM llamó marcar_proveedor
   let isPaymentEscalation = false; // se activa si el LLM llamó escalar_pago
 
-  // Agentic loop — keep going while Gemini wants to use tools
+  // Agentic loop — keep going while Groq wants to use tools
   while (response.stop_reason === 'tool_use') {
     const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
     const toolResults = [];
@@ -493,8 +409,7 @@ async function runTurn(clientRecord, history, userMessage) {
     messages.push({ role: 'assistant', content: response.content });
     messages.push({ role: 'user', content: toolResults });
 
-    response = await createGeminiResponse({
-      model: MODEL,
+    response = await runGroqChat({
       maxTokens: MAX_REPLY_TOKENS,
       system: systemPrompt,
       tools: TOOLS,

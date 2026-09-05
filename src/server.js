@@ -1,15 +1,14 @@
 require('dotenv').config();
 
 // ── Validación de proveedor LLM al inicio ─────────────────────────────────────
-// El ÚNICO proveedor permitido es Google Gemini. Si GEMINI_API_KEY no está
-// configurada, el servidor falla en arranque con mensaje claro — nunca usa Anthropic.
-const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
-if (!GEMINI_API_KEY) {
-  console.error('[FATAL] GEMINI_API_KEY no está configurada en las variables de entorno.');
-  console.error('[FATAL] Este servidor usa ÚNICAMENTE Google Gemini. Configura GEMINI_API_KEY en Railway y redespliega.');
+// El bot usa Groq como proveedor principal de IA.
+const GROQ_API_KEY = (process.env.GROQ_API_KEY || '').trim();
+if (!GROQ_API_KEY) {
+  console.error('[FATAL] GROQ_API_KEY no está configurada en las variables de entorno.');
+  console.error('[FATAL] Configura GROQ_API_KEY en Railway y redespliega.');
   process.exit(1);
 }
-console.log(`[startup] LLM provider: Google Gemini | model: ${process.env.GEMINI_MODEL || 'gemini-2.5-flash'} | key: ${GEMINI_API_KEY.slice(0, 12)}...`);
+console.log(`[startup] LLM provider: Groq | model: ${process.env.GROQ_MODEL || 'moonshotai/kimi-k2-instruct'} | key: ${GROQ_API_KEY.slice(0, 12)}...`);
 
 const express    = require('express');
 const path       = require('path');
@@ -25,6 +24,21 @@ const { getGuardStats } = require('./guards');
 const { installGlobalSafeNet } = require('./safe-mode');
 
 const app = express();
+
+function envStatus() {
+  const required = [
+    'GROQ_API_KEY',
+    'WHATSAPP_PROVIDER',
+    'OWNER_PHONE',
+  ];
+  const provider = (process.env.WHATSAPP_PROVIDER || '360dialog').trim();
+  const missing = required.filter((name) => !String(process.env[name] || '').trim());
+  return {
+    providerConfigured: provider,
+    missing,
+    secretsOk: !missing.length,
+  };
+}
 
 // ── Ensure schema (idempotente, no bloquea el arranque) ─────────────────────────
 // Crea la tabla `vehiculos` (multi-vehículo por cliente) y backfillea el vehículo
@@ -95,6 +109,24 @@ async function ensureSchema() {
       );
     `);
     console.log('[db] ensureSchema OK (vehiculos, consultas_precio, precios_estandar, mensajes_procesados, conversaciones+control, _migraciones)');
+
+    // Limpieza de seguridad: conversaciones dejadas por SAFE MODE técnico vuelven a BOT.
+    try {
+      const reset = await pool.query(
+        `UPDATE conversaciones
+            SET owner_type = 'BOT',
+                owner_id = NULL,
+                conversation_mode = 'BOT',
+                last_owner_change = NOW(),
+                updated_at = NOW()
+          WHERE owner_type = 'HUMAN' AND owner_id = 'SYSTEM'`
+      );
+      if (reset.rowCount) {
+        console.log(`[db] safe-mode cleanup: ${reset.rowCount} conversación(es) liberadas a BOT`);
+      }
+    } catch (e) {
+      console.error('[db] safe-mode cleanup falló (continúa el arranque):', e.message);
+    }
 
     // Migración de una sola vez: limpiar precios incrustados en nombres del catálogo.
     await runCatalogCleanOnce();
@@ -240,7 +272,8 @@ app.get('/', (req, res) => res.redirect('/admin'));
 app.get('/health', (_, res) => res.json({
   status:   'ok',
   service:  'monterito-erp',
-  provider: process.env.WHATSAPP_PROVIDER || 'wati',
+  provider: process.env.WHATSAPP_PROVIDER || '360dialog',
+  env: envStatus(),
   ...getGuardStats(),
 }));
 
