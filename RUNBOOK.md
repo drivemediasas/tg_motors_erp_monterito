@@ -24,8 +24,28 @@ Nota: el directorio del proyecto termina en espacio: `Workflow TG Motors ` (usar
 Críticas: `DATABASE_URL`, `GROQ_API_KEY`, `WHATSAPP_PROVIDER=360dialog`, `D360_API_KEY`, `D360_WEBHOOK_SECRET`, `OWNER_PHONE` (número de Diego: `593987189276`), `DASHBOARD_EMAIL`, `DASHBOARD_PASSWORD`.
 LLM: `GROQ_MODEL` (default `moonshotai/kimi-k2-instruct`), `GROQ_FALLBACK_MODEL` (default `llama-3.3-70b-versatile`), `GROQ_TIMEOUT_MS=20000`.
 Config taller: `SHOP_NAME/CITY/ADDRESS/HOURS/SERVICES`, `SHOP_TECHNICIANS`, `SHOP_CAPACITY`, `GOOGLE_REVIEW_URL`, `OWNER_NAME`.
-Resiliencia (default): `HUMAN_TIMEOUT_MIN=20`, `LOCK_TIMEOUT_MS=45000`, `OWNER_NOTIFY_COOLDOWN_MS=600000`, `DB_POOL_MAX=10`, `BATCH_MS=1200`, `REMINDER_TEMPLATE_NAME`.
-Pruebas: `ADMIN_PHONE` = teléfono con bypass de admin para QA (`593999648041` de Emilio). Vacío = solo OWNER_PHONE tiene acceso admin.
+Resiliencia (default): `HUMAN_TIMEOUT_MIN=20`, `LOCK_TIMEOUT_MS=45000`, `OWNER_NOTIFY_COOLDOWN_MS=600000`, `DB_POOL_MAX=10`, `BATCH_MS=1200`, `COEXISTENCE_ECHO_DETECT=off`, `REMINDER_TEMPLATE_NAME`.
+
+## Quién habla con quién
+- El bot **solo** conversa con **clientes** del taller.
+- **`OWNER_PHONE` (Diego)**: el bot lo IGNORA. Diego usa ese chat para hablar con la administradora
+  (su hermana). El bot solo reacciona a comandos: `#humano <tel>`, `#bot <tel>`, `#proveedor <tel>`,
+  `#cliente <tel>` — o a una respuesta CITANDO la notificación 📋 de una consulta de precio.
+- **La administradora** atiende el número desde la app de WhatsApp. Para que el bot calle mientras
+  ella responde a un cliente: hoy, `#humano <tel del cliente>` desde el chat de Diego. La detección
+  automática (`COEXISTENCE_ECHO_DETECT=on`) está **apagada** hasta verificar el payload real —
+  ver "Activar detección de respuesta humana" abajo.
+- **No hay número de QA con permisos especiales**: para probar, se usa cualquier número que NO sea
+  `OWNER_PHONE` y se comporta 100% como cliente.
+
+## Activar detección de respuesta humana (coexistence)
+1. Con `COEXISTENCE_ECHO_DETECT=off` (default), pedir a alguien que responda a un cliente desde la
+   app de WhatsApp del taller y capturar en `railway logs` la línea `[360dialog] webhook received`
+   y el evento asociado (necesitamos ver `metadata.display_phone_number`, `messages[0].from`,
+   `messages[0].id` y a quién iba dirigido).
+2. Confirmar que el `id` del eco de un mensaje que mandó el bot coincide con el que devolvió la API
+   (si no coincide, hay que ajustar `wasSentByBot`).
+3. Recién ahí: `railway variables --set COEXISTENCE_ECHO_DETECT=on` y subir `HUMAN_TIMEOUT_MIN=60`.
 
 ## Rotar el modelo LLM
 1. Ver modelos vigentes en Groq: https://console.groq.com/docs/models (o `curl https://api.groq.com/openai/v1/models -H "Authorization: Bearer $GROQ_API_KEY"`).

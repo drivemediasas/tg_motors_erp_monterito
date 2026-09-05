@@ -10,7 +10,7 @@ process.env.SHOP_SERVICES = process.env.SHOP_SERVICES || 'Cambio de aceite, Fren
 const assert = require('assert');
 const { decideRelayTarget } = require('../../src/relay-router');
 const { withLock } = require('../../tools/lock');
-const { markProcessedDurable } = require('../../tools/db/messages-processed');
+const { markProcessedDurable, fallbackId } = require('../../tools/db/messages-processed');
 const { buildSystemPrompt } = require('../../prompts/monterito');
 
 let pass = 0, fail = 0;
@@ -114,7 +114,17 @@ function fakeStore() {
     assert.strictEqual(again.duplicate, true, 'el store durable debió recordar el id');
   });
 
-  // ── Test 9: Parser de encuesta (rating 1–5) sin falsos positivos ────────────
+  // ── Test 9b: fallbackId — mensajes idénticos seguidos NUNCA colisionan ───────
+  await test('fallbackId — "2" repetido del mismo número → ids siempre distintos', () => {
+    const ids = new Set([
+      fallbackId('593900000099', '2'),
+      fallbackId('593900000099', '2'),
+      fallbackId('593900000099', '2'),
+    ]);
+    assert.strictEqual(ids.size, 3, 'cada inbound debe tener id único (nunca tragar un mensaje)');
+  });
+
+  // ── Test 10: Parser de encuesta (rating 1–5) sin falsos positivos ────────────
   await test('Encuesta — parseSurveyRating acepta ratings y rechaza texto normal', () => {
     const { parseSurveyRating } = require('../../src/survey');
     assert.strictEqual(parseSurveyRating('5'), 5);

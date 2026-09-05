@@ -6,6 +6,20 @@ const RETRY_DELAY_MS = 800;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// IDs de mensajes que ENVIÓ el bot (por la API). En modo coexistence, 360dialog
+// reenvía al webhook también los mensajes salientes; esto permite distinguir
+// "lo mandó el bot" de "lo mandó la administradora desde la app de WhatsApp".
+const _botSentIds = new Set();
+const _BOT_SENT_MAX = 3000;
+function recordBotSentId(id) {
+  if (!id) return;
+  _botSentIds.add(id);
+  if (_botSentIds.size > _BOT_SENT_MAX) _botSentIds.delete(_botSentIds.values().next().value);
+}
+function wasSentByBot(id) {
+  return !!id && _botSentIds.has(id);
+}
+
 // Reintentable: timeout de red o error 5xx del proveedor. Un 4xx (número inválido,
 // fuera de la ventana de 24h, plantilla requerida) NO se reintenta.
 function isRetriableSendError(err) {
@@ -44,7 +58,9 @@ async function sendMessage(phone, text, _attempt = 1) {
         timeout: TIMEOUT_MS,
       }
     );
-    console.log('[360dialog] message accepted', { to: phone, messageId: response.data?.messages?.[0]?.id });
+    const sentId = response.data?.messages?.[0]?.id;
+    recordBotSentId(sentId);
+    console.log('[360dialog] message accepted', { to: phone, messageId: sentId });
     return response.data;
   } catch (err) {
     if (err.response) {
@@ -99,6 +115,7 @@ async function sendTemplate(phone, templateName, params = []) {
         timeout: TIMEOUT_MS,
       }
     );
+    recordBotSentId(response.data?.messages?.[0]?.id);
     console.log('[360dialog] template accepted', { to: phone, template: templateName, messageId: response.data?.messages?.[0]?.id });
     return response.data;
   } catch (err) {
@@ -111,4 +128,4 @@ async function sendTemplate(phone, templateName, params = []) {
   }
 }
 
-module.exports = { sendMessage, sendTemplate };
+module.exports = { sendMessage, sendTemplate, wasSentByBot };

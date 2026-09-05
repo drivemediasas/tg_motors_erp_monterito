@@ -6,11 +6,23 @@ Actualizado: 2026-07-01
 - **Mono-taller.** No es multi-tenant. Un despliegue = un taller (config por variables de entorno). Soportar cientos de talleres requiere rearquitectura (`tenant_id` en todas las tablas).
 - **Adjuntar PDF en WhatsApp = paso manual.** Los links `wa.me` (los que abre "Abrir WhatsApp") **solo pre-cargan texto, no archivos**. Al enviar orden/prefactura: se abre el chat con el resumen y **se descarga el PDF automáticamente**; el asesor lo **adjunta manualmente** (arrastrar al chat). No es posible pre-adjuntar un archivo vía `wa.me`.
 
+## Quién habla con quién
+- El bot **solo** conversa con **clientes**.
+- **`OWNER_PHONE` (Diego) → el bot lo ignora.** Diego usa ese chat para hablar con la administradora
+  (su hermana), que atiende el número. El bot solo obedece comandos `#humano/#bot/#proveedor/#cliente`
+  y respuestas citando la notificación 📋 de una consulta de precio. Cualquier otro texto de Diego
+  se guarda en historial y el bot calla.
+- **No hay número de QA con permisos especiales.** Para probar se usa cualquier número ≠ OWNER_PHONE.
+
 ## Detección de intervención humana
-- **Auto-detección de "Diego respondió manual desde la app de WhatsApp": NO implementada** (quedó gated OFF). Depende de que 360dialog reenvíe al webhook los mensajes salientes del humano (Coexistence) — **NO VERIFICADO** en producción.
+- **Auto-detección de "respondieron a mano desde la app de WhatsApp" (coexistence): implementada pero
+  APAGADA** (`COEXISTENCE_ECHO_DETECT=off`). El código en `src/handlers/360dialog.js` detecta el
+  saliente del número del taller y distingue el eco del bot del mensaje humano, pero el shape exacto
+  del payload de 360dialog **no está verificado en producción** → activarla a ciegas podría hacer que
+  el bot se silencie a sí mismo. Ver RUNBOOK "Activar detección de respuesta humana".
 - Mecanismos que SÍ funcionan hoy para pasar a modo humano:
   - El bot escala solo (cotización/precio) → `WAITING_HUMAN` → queda en silencio.
-  - Comandos del asesor desde el WhatsApp del dueño: `#humano <telefono>` (tomar), `#bot <telefono>` (devolver).
+  - `#humano <telefono>` (tomar) / `#bot <telefono>` (devolver) desde el WhatsApp de Diego.
   - Reactivación automática por timeout (`HUMAN_TIMEOUT_MIN`, default 20 min).
 
 ## Batching de mensajes rápidos (anti-race)

@@ -16,7 +16,7 @@ const { parseSurveyRating } = require('../survey');
 const { sendReviewRequest } = require('./outbound');
 const { withLock }        = require('../../tools/lock');
 const { shouldBotRespond, parseAdvisorCommand } = require('../control');
-const { getConversationState, setConversationState, markBotActivity, takeOverByHuman, releaseToBot } = require('../../tools/db/conversation-state');
+const { getConversationState, markBotActivity, takeOverByHuman, releaseToBot } = require('../../tools/db/conversation-state');
 const { setProvider }     = require('../../tools/db/mark-provider');
 const { enterSafeMode }   = require('../safe-mode');
 const pool                = require('../../tools/db/client');
@@ -74,15 +74,6 @@ function makeFallbackReply(text) {
 
 function normalizePhone(phone) {
   return String(phone || '').replace(/\D/g, '');
-}
-
-function getAdminPhones() {
-  const raw = [
-    process.env.ADMIN_PHONE || '',
-    process.env.ADMIN_PHONE_1 || '',
-    process.env.ADMIN_PHONE_2 || '',
-  ].filter(Boolean);
-  return new Set(raw.map(normalizePhone).filter(Boolean));
 }
 
 function normalizeTextForMatch(text) {
@@ -175,16 +166,36 @@ async function handleQuickReply(phone, text, opts = {}) {
   return null;
 }
 
+// Marcadores exclusivos del menú de Monterito (no de una lista cualquiera del LLM).
+const MENU_MARKERS = /(puedo ayudarte con:|responde con el n[uú]mero|soy monterito)/i;
+const BARE_DIGIT_RE = /^\s*[1-5]\s*$/;
+
+function isMenuMessage(content) {
+  const c = String(content || '');
+  return MENU_MARKERS.test(c) && /\n\s*1\)/.test(c) && /\n\s*2\)/.test(c);
+}
+
 /**
- * ¿El último mensaje del bot mostró el menú numerado (o es el primer contacto)?
- * Solo en ese caso un dígito suelto "1".."5" debe interpretarse como opción de menú.
+ * ¿El menú numerado sigue "activo"? Lo está si:
+ *   · es el primer contacto (sin historial), o
+ *   · el bot mostró el menú y, desde entonces, el cliente SOLO mandó dígitos 1-5.
+ * Si el cliente escribió texto libre después del menú (ej. "tengo un Corsa"),
+ * el menú deja de estar activo y un "2" posterior lo maneja el LLM (puede ser
+ * respuesta a "¿1 o 2 puertas?"), no el fast-path.
  */
 function menuJustShown(priorMessages) {
   if (!Array.isArray(priorMessages) || priorMessages.length === 0) return true;
-  const lastAssistant = [...priorMessages].reverse().find(m => m.role === 'assistant');
-  if (!lastAssistant) return true;
-  const c = String(lastAssistant.content || '');
-  return /\n\s*1\)/.test(c) && /\n\s*2\)/.test(c);
+  let lastMenuIdx = -1;
+  for (let i = priorMessages.length - 1; i >= 0; i--) {
+    const m = priorMessages[i];
+    if (m.role === 'assistant' && isMenuMessage(m.content)) { lastMenuIdx = i; break; }
+  }
+  if (lastMenuIdx === -1) return false;
+  for (let j = lastMenuIdx + 1; j < priorMessages.length; j++) {
+    const m = priorMessages[j];
+    if (m.role === 'user' && !BARE_DIGIT_RE.test(String(m.content || ''))) return false;
+  }
+  return true;
 }
 
 /**
@@ -424,39 +435,24 @@ async function processMessageInner(phone, text, sendFn, meta = {}) {
   console.log(`[inbound] ${phone}: ${text.slice(0, 120)}`);
 
   const incomingPhone = normalizePhone(phone);
-  const adminPhones = getAdminPhones();
 
-  // Admin de pruebas: bypass total para validar el bot sin quedar atrapado en HUMAN.
-  if (adminPhones.has(incomingPhone)) {
-    // Si quedó con estado humano/pausa, lo regresamos a BOT para pruebas.
-    await setConversationState(phone, {
-      owner_type: 'BOT',
-      owner_id: null,
-      conversation_mode: 'BOT',
-      last_owner_change: new Date().toISOString(),
-      last_human_activity: null,
-    }).catch(() => {});
-    const adminHist = await getHistory(phone);
-    const quickReplyText = await handleQuickReply(phone, text, { allowMenu: menuJustShown(adminHist?.historial) });
-    if (quickReplyText) {
-      await markBotActivity(phone, meta.messageId).catch(() => {});
-      await sendFn(quickReplyText);
-      await appendMessage({
-        telefono: phone, paso: 'activo',
-        servicioElegido: adminHist?.servicioElegido || null,
-        newMessages: [{ role: 'user', content: text }, { role: 'assistant', content: quickReplyText }],
-        existingRecordId: adminHist?.recordId || null,
-      });
-      return;
-    }
-    console.log('[admin-test] bypass', { phone: incomingPhone });
-    return handleAdminMessage(phone, text, sendFn, meta);
-  }
-
-  // Admin mode: owner bypasses all guards — they need full ERP access
+  // ── Número del dueño (Diego) ────────────────────────────────────────────────
+  // El WhatsApp del taller lo atiende la administradora; Diego usa este chat para
+  // hablar con ella. El bot NO debe meterse. Solo reacciona a:
+  //   · comandos del asesor: #humano / #bot / #proveedor / #cliente
+  //   · una respuesta CITANDO la notificación 📋 de una consulta de precio (relay)
+  // Cualquier otro texto de Diego → se guarda en historial y el bot calla.
   const ownerPhone = normalizePhone(process.env.OWNER_PHONE);
   if (ownerPhone && incomingPhone === ownerPhone) {
-    return handleAdminMessage(phone, text, sendFn, meta);
+    const isCommand = !!parseAdvisorCommand(text);
+    if (isCommand || meta.quotedId) {
+      return handleAdminMessage(phone, text, sendFn, meta);
+    }
+    const h = await getHistory(phone);
+    await appendMessage({ telefono: phone, paso: 'owner_chat', servicioElegido: h?.servicioElegido || null,
+      newMessages: [{ role: 'user', content: text }], existingRecordId: h?.recordId || null });
+    console.log('[owner] mensaje de Diego sin comando — bot en silencio', { phone });
+    return;
   }
 
   // Fast path para preguntas muy comunes: evita el LLM por completo.
