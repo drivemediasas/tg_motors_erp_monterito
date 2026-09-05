@@ -7,22 +7,24 @@ const { bump } = require('../metrics');
  *   LLM_API_KEY / LLM_BASE_URL / LLM_MODEL / LLM_FALLBACK_MODEL / LLM_TIMEOUT_MS
  *   (con fallback a los nombres viejos GROQ_* para no romper despliegues previos)
  *
- * Por defecto: Google Gemini (endpoint compatible OpenAI) — free tier con 1M
- * tokens/min, más que suficiente para un asistente de WhatsApp y sin costo.
- *   LLM_API_KEY  = tu key de https://aistudio.google.com/apikey
- *   LLM_BASE_URL = https://generativelanguage.googleapis.com/v1beta/openai
- *   LLM_MODEL    = gemini-3.6-flash
+ * DEFAULT: Cerebras — muy rápido, tool-use sólido por OpenAI-compat (sin
+ * "thought signatures" como Gemini 2.5/3, que rompen las herramientas en multi-turno).
+ * Modelos públicos vigentes (verificados sep-2026): gpt-oss-120b, qwen-3.8-27b.
+ *   LLM_API_KEY  = key de https://cloud.cerebras.ai
+ *   LLM_BASE_URL = https://api.cerebras.ai/v1
+ *   LLM_MODEL    = gpt-oss-120b        (free trial: 5 req/min, 1M tokens/día)
+ *   LLM_FALLBACK_MODEL = qwen-3.8-27b
  *
- * Para Groq:
- *   LLM_BASE_URL = https://api.groq.com/openai/v1
- *   LLM_MODEL    = openai/gpt-oss-120b   (o el que corresponda)
+ * Alternativas (solo cambiar LLM_BASE_URL + LLM_MODEL + LLM_API_KEY):
+ *   Groq (30 req/min free): https://api.groq.com/openai/v1 + openai/gpt-oss-20b
+ *   NO usar Gemini con herramientas (2.5 y 3.x exigen thought_signature → 400).
  */
 
 const API_KEY = (process.env.LLM_API_KEY || process.env.GROQ_API_KEY || '').replace(/\s/g, '');
 const BASE_URL = (process.env.LLM_BASE_URL || process.env.GROQ_BASE_URL
-  || 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/+$/, '');
-const MODEL = process.env.LLM_MODEL || process.env.GROQ_MODEL || 'gemini-3.6-flash';
-const FALLBACK_MODEL = process.env.LLM_FALLBACK_MODEL || process.env.GROQ_FALLBACK_MODEL || 'gemini-3.6-flash';
+  || 'https://api.cerebras.ai/v1').replace(/\/+$/, '');
+const MODEL = process.env.LLM_MODEL || process.env.GROQ_MODEL || 'gpt-oss-120b';
+const FALLBACK_MODEL = process.env.LLM_FALLBACK_MODEL || process.env.GROQ_FALLBACK_MODEL || 'qwen-3.8-27b';
 const TIMEOUT_MS = parseInt(process.env.LLM_TIMEOUT_MS || process.env.GROQ_TIMEOUT_MS || '25000', 10);
 
 function toOpenAiTools(tools) {

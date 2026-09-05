@@ -22,7 +22,7 @@ Nota: el directorio del proyecto termina en espacio: `Workflow TG Motors ` (usar
 
 ## Variables de entorno
 Críticas: `DATABASE_URL`, `LLM_API_KEY`, `WHATSAPP_PROVIDER=360dialog`, `D360_API_KEY`, `D360_WEBHOOK_SECRET`, `OWNER_PHONE` (número de Diego: `593987189276`), `DASHBOARD_EMAIL`, `DASHBOARD_PASSWORD`.
-LLM (default = Gemini free tier, 1M tokens/min): `LLM_API_KEY` (key gratis: https://aistudio.google.com/apikey), `LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai`, `LLM_MODEL=gemini-3.6-flash`, `LLM_FALLBACK_MODEL=gemini-3.6-flash`. Para Groq: `LLM_BASE_URL=https://api.groq.com/openai/v1`, `LLM_MODEL=openai/gpt-oss-120b`. Los nombres viejos `GROQ_*` siguen funcionando.
+LLM (default = Cerebras): `LLM_API_KEY` (https://cloud.cerebras.ai), `LLM_BASE_URL=https://api.cerebras.ai/v1`, `LLM_MODEL=gpt-oss-120b`, `LLM_FALLBACK_MODEL=qwen-3.8-27b`. Free trial = 5 req/min · 1M tokens/día — para el cliente que paga, activar pay-as-you-go en Cerebras (~$5-10/mes). Alternativa Groq (30 req/min free): `LLM_BASE_URL=https://api.groq.com/openai/v1`, `LLM_MODEL=openai/gpt-oss-20b`. **NO usar Gemini con herramientas** (2.5/3.x exigen thought_signature → 400). Nombres viejos `GROQ_*` siguen funcionando.
 Config taller: `SHOP_NAME/CITY/ADDRESS/HOURS/SERVICES`, `SHOP_TECHNICIANS`, `SHOP_CAPACITY`, `GOOGLE_REVIEW_URL`, `OWNER_NAME`.
 Resiliencia (default): `HUMAN_TIMEOUT_MIN=20`, `LOCK_TIMEOUT_MS=45000`, `OWNER_NOTIFY_COOLDOWN_MS=600000`, `DB_POOL_MAX=10`, `BATCH_MS=1200`, `COEXISTENCE_ECHO_DETECT=on`, `REMINDER_TEMPLATE_NAME`.
 

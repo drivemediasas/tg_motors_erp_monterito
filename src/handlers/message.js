@@ -70,7 +70,15 @@ function resolveContextualReply(text, clientName = 'hola') {
   return `${buildMainMenu(clientName.split(' ')[0])}\n\nPara avanzar rápido, también puedes escribir algo como: cambio de aceite el lunes a las 9am.`;
 }
 
-function makeFallbackReply(text) {
+// Respuesta cuando el turno falla (error del LLM, timeout, etc.).
+// Si YA hay conversación en curso, NO tiramos el menú de bienvenida (rompe el hilo):
+// pedimos que repita. El menú completo solo en el primer contacto o si saluda.
+function makeFallbackReply(text, hasContext = false) {
+  const norm = normalizeTextForMatch(text);
+  const isGreeting = /\b(hola|buenas|buenos dias|buenas tardes|buenas noches)\b/.test(norm);
+  if (hasContext && !isGreeting) {
+    return 'Perdón, tuve un problema técnico y no pude procesar eso ahora mismo. ¿Me repites lo último, por favor? 🙏';
+  }
   return resolveContextualReply(text, 'hola');
 }
 
@@ -420,8 +428,13 @@ async function processMessage(phone, text, sendFn, meta = {}) {
       console.error('[processMessage] error:', err.message);
       const isWatchdog = /watchdog timeout/i.test(err.message || '');
       if (isWatchdog) bump('turnTimeouts');
+      let hasContext = false;
       try {
-        await sendFn(makeFallbackReply(text));
+        const h = await getHistory(phone);
+        hasContext = (h?.historial?.length || 0) >= 2;
+      } catch { /* sin historial → menú normal */ }
+      try {
+        await sendFn(makeFallbackReply(text, hasContext));
       } catch (sendErr) {
         console.error('[processMessage] fallback send failed:', sendErr.message);
       }
@@ -626,4 +639,4 @@ async function processMessageInner(phone, text, sendFn, meta = {}) {
   });
 }
 
-module.exports = { processMessage, handleQuickReply, menuJustShown, buildMainMenu, PAYMENT_ISSUE_RE };
+module.exports = { processMessage, handleQuickReply, menuJustShown, buildMainMenu, makeFallbackReply, PAYMENT_ISSUE_RE };
