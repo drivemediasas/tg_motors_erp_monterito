@@ -23,7 +23,9 @@ const API_KEY = (process.env.LLM_API_KEY || process.env.GROQ_API_KEY || '').repl
 const BASE_URL = (process.env.LLM_BASE_URL || process.env.GROQ_BASE_URL
   || 'https://api.groq.com/openai/v1').replace(/\/+$/, '');
 const MODEL = process.env.LLM_MODEL || process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
-const FALLBACK_MODEL = process.env.LLM_FALLBACK_MODEL || process.env.GROQ_FALLBACK_MODEL || 'openai/gpt-oss-120b';
+// Mismo modelo por defecto: no asumimos que otro esté habilitado en el proyecto.
+// (openai/gpt-oss-120b suele estar bloqueado a nivel de proyecto en Groq.)
+const FALLBACK_MODEL = process.env.LLM_FALLBACK_MODEL || process.env.GROQ_FALLBACK_MODEL || MODEL;
 const TIMEOUT_MS = parseInt(process.env.LLM_TIMEOUT_MS || process.env.GROQ_TIMEOUT_MS || '25000', 10);
 
 function toOpenAiTools(tools) {
@@ -192,11 +194,14 @@ async function runGroqChat({ system, tools, messages, maxTokens, temperature = 0
   } catch (err) {
     if (!isTransientError(err)) throw err;
 
+    // Rate limit con "try again in Xs": si es una espera razonable, aguantamos y
+    // reintentamos el MISMO modelo (mejor 25s lento que un error o el menú).
+    // El watchdog del turno es 90s, así que hay margen.
     const m = /try again in ([\d.]+)s/i.exec(err.message || '');
     const waitS = m ? parseFloat(m[1]) : 0;
-    if (waitS > 0 && waitS <= 8) {
+    if (waitS > 0 && waitS <= 28) {
       console.warn(`[llm] rate limit; espero ${waitS}s y reintento ${MODEL}`);
-      await new Promise(r => setTimeout(r, waitS * 1000 + 300));
+      await new Promise(r => setTimeout(r, waitS * 1000 + 500));
       try { return await callOnce({ model: MODEL, payloadBase }); }
       catch (e2) { if (!isTransientError(e2)) throw e2; }
     }
