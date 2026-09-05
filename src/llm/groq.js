@@ -1,6 +1,10 @@
+const { bump } = require('../metrics');
+
 const GROQ_API_KEY = (process.env.GROQ_API_KEY || '').replace(/\s/g, '');
 const GROQ_MODEL = process.env.GROQ_MODEL || 'moonshotai/kimi-k2-instruct';
+const GROQ_FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || 'llama-3.3-70b-versatile';
 const GROQ_BASE_URL = process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1';
+const GROQ_TIMEOUT_MS = parseInt(process.env.GROQ_TIMEOUT_MS || '20000', 10);
 
 function toOpenAiTools(tools) {
   return (tools || []).map((tool) => ({
@@ -85,31 +89,35 @@ function toOpenAiMessages(messages) {
   return converted;
 }
 
-async function runGroqChat({ system, tools, messages, maxTokens, temperature = 0.3 }) {
-  if (!GROQ_API_KEY) {
-    throw new Error('GROQ_API_KEY no está configurada');
+function isTransientGroqError(err) {
+  const msg = String(err?.message || err || '');
+  return /timeout|aborted|ECONNRESET|ETIMEDOUT|ENOTFOUND|fetch failed|Groq API error (429|5\d\d)|model_decommissioned|model_not_found|rate limit/i.test(msg);
+}
+
+async function callGroqOnce({ model, payloadBase }) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GROQ_TIMEOUT_MS);
+
+  let res;
+  try {
+    res = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ...payloadBase, model }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      bump('groqTimeouts');
+      throw new Error(`Groq timeout tras ${GROQ_TIMEOUT_MS}ms (model ${model})`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-
-  const payload = {
-    model: GROQ_MODEL,
-    messages: [
-      ...(system ? [{ role: 'system', content: system }] : []),
-      ...toOpenAiMessages(messages),
-    ],
-    tools: toOpenAiTools(tools),
-    tool_choice: 'auto',
-    temperature,
-    max_completion_tokens: maxTokens,
-  };
-
-  const res = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${GROQ_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -120,9 +128,7 @@ async function runGroqChat({ system, tools, messages, maxTokens, temperature = 0
   const choice = data.choices?.[0]?.message || {};
   const content = [];
   const text = choice.content || '';
-  if (text) {
-    content.push({ type: 'text', text });
-  }
+  if (text) content.push({ type: 'text', text });
   for (const call of choice.tool_calls || []) {
     content.push({
       type: 'tool_use',
@@ -142,4 +148,35 @@ async function runGroqChat({ system, tools, messages, maxTokens, temperature = 0
   };
 }
 
-module.exports = { runGroqChat, GROQ_MODEL };
+/**
+ * Llama a Groq con timeout duro. Si el modelo primario falla con un error
+ * transitorio (timeout, 429, 5xx, modelo dado de baja), reintenta UNA vez con
+ * el modelo de respaldo. Así una deprecación de modelo no tumba el bot.
+ */
+async function runGroqChat({ system, tools, messages, maxTokens, temperature = 0.2 }) {
+  if (!GROQ_API_KEY) {
+    throw new Error('GROQ_API_KEY no está configurada');
+  }
+
+  const payloadBase = {
+    messages: [
+      ...(system ? [{ role: 'system', content: system }] : []),
+      ...toOpenAiMessages(messages),
+    ],
+    tools: toOpenAiTools(tools),
+    tool_choice: 'auto',
+    temperature,
+    max_completion_tokens: maxTokens,
+  };
+
+  try {
+    return await callGroqOnce({ model: GROQ_MODEL, payloadBase });
+  } catch (err) {
+    if (!isTransientGroqError(err) || GROQ_FALLBACK_MODEL === GROQ_MODEL) throw err;
+    console.warn(`[groq] modelo primario falló (${err.message}); reintento con ${GROQ_FALLBACK_MODEL}`);
+    bump('groqFallbackUsed');
+    return await callGroqOnce({ model: GROQ_FALLBACK_MODEL, payloadBase });
+  }
+}
+
+module.exports = { runGroqChat, GROQ_MODEL, GROQ_FALLBACK_MODEL, isTransientGroqError };

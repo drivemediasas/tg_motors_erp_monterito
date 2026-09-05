@@ -42,12 +42,27 @@ Actualizado: 2026-07-01 · Entorno: Railway `tg-motors-monterito` / production
 - [x] Guards: rate limit, longitud, prompt-injection, filtro de tema
 
 ## Tests
-- [x] `node tools/test/isolation.test.js` → 8/8
-- [x] `node tools/test/control.test.js` → 14/14
-- [x] `node --check` en todos los .js
-- [ ] `npm test` / `npm run lint` — NO DISPONIBLE (no configurados)
+- [x] `npm test` → 5 suites verdes (control, isolation, agent-limits, owner-notify, quick-reply)
+- [x] CI en GitHub Actions (`.github/workflows/ci.yml`) corre `npm test` + boot en cada push/PR
+
+## Resiliencia (anti-bloqueo / anti-spam)
+- [x] Loop de tools topado a 4 iteraciones (`src/agent-limits.js`)
+- [x] Herramientas con efecto externo: máx. 1 vez por turno
+- [x] Alertas al dueño con rate-limit + dedup (`src/owner-notify.js`, cooldown 10 min)
+- [x] Timeout duro a Groq (20s) + fallback automático de modelo
+- [x] Watchdog de 45s por turno (`tools/lock.js`) — un turno colgado no congela el número
+- [x] Timeouts de DB (connection 5s, statement 8s)
+- [x] Reintento de envío 360dialog ante 5xx/timeout
+- [x] `uncaughtException` logueado sin tumbar el proceso
+- [x] `/health` expone `metrics` (loopCapHits, ownerNotifications, groqTimeouts, turnTimeouts, ...)
+
+## Pre-deploy (cada vez)
+- [ ] `npm test` local en verde
+- [ ] Variables Railway: `OWNER_PHONE=593987189276`, `ADMIN_PHONE=593999648041` (QA), `GROQ_API_KEY` seteada
+- [ ] 360dialog: el webhook apunta a **una sola** URL (`/webhook/360dialog`)
+- [ ] Tras `railway up`: `curl /health` 200 + `railway logs` sin `[SAFE_MODE]` en el arranque
 
 ## Pendiente manual antes de cobrar
-- [ ] Prueba en vivo por WhatsApp: cliente nuevo, cotización, relay citado por Diego, `#humano`/`#bot`.
+- [ ] Plan de prueba funcional por WhatsApp (secciones A–H del plan) 100% en verde
 - [ ] (Opcional) Cargar `precios_estandar` con la lista del dueño.
 - [ ] (Opcional) Configurar `REMINDER_TEMPLATE_NAME` para recordatorios fuera de 24h.

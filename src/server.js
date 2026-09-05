@@ -14,13 +14,13 @@ const express    = require('express');
 const path       = require('path');
 const helmet     = require('helmet');
 const rateLimit  = require('express-rate-limit');
-const { handleInbound } = require('./handlers/message');
 const { handleRespondioInbound } = require('./handlers/respondio');
 const { handleD360Inbound } = require('./handlers/360dialog');
 const scheduler  = require('./scheduler');
 const apiRouter  = require('./routes/api');
 const pool       = require('../tools/db/client');
 const { getGuardStats } = require('./guards');
+const { getMetrics } = require('./metrics');
 const { installGlobalSafeNet } = require('./safe-mode');
 
 const app = express();
@@ -211,9 +211,11 @@ app.get('/webhook', (req, res) => {
   res.sendStatus(403);
 });
 
+// Se responde 200 ANTES de procesar para que WhatsApp no reintente (y no duplique).
+// Comparte el handler deduplicado de 360dialog (mismo shape Meta Cloud API).
 app.post('/webhook', async (req, res) => {
   res.status(200).end();
-  try { await handleInbound(req.body); }
+  try { await handleD360Inbound(req.body); }
   catch (err) { console.error('[webhook] error:', err.message); }
 });
 
@@ -275,6 +277,7 @@ app.get('/health', (_, res) => res.json({
   provider: process.env.WHATSAPP_PROVIDER || '360dialog',
   env: envStatus(),
   ...getGuardStats(),
+  ...getMetrics(),
 }));
 
 const PORT = process.env.PORT || 3000;

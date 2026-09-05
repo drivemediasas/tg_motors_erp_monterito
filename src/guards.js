@@ -224,13 +224,13 @@ function _buildStaticCache() {
 
 let _cacheBuilt = false;
 
-const MENU_NUMBER_KEYS = { '1': 'horario', '2': 'direccion', '3': 'servicios' };
-
+// Nota: un dígito suelto ("1".."5") NO se mapea aquí. La selección numérica de menú
+// se resuelve en handleQuickReply (message.js) y solo cuando el bot acaba de mostrar
+// el menú — así un "2" que responde a otra pregunta no dispara la dirección.
 function getStaticResponse(text) {
   if (!_cacheBuilt) { _buildStaticCache(); _cacheBuilt = true; }
   const direct = String(text || '').trim().toLowerCase();
   if (_staticCache.has(direct)) return _staticCache.get(direct) || null;
-  if (MENU_NUMBER_KEYS[direct]) return _staticCache.get(MENU_NUMBER_KEYS[direct]) || null;
   for (const { key, re } of STATIC_PATTERNS) {
     if (re.test(text)) return _staticCache.get(key) || null;
   }

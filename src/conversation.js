@@ -15,6 +15,8 @@ const { setProvider } = require('../tools/db/mark-provider');
 const pool = require('../tools/db/client');
 const { trimHistory } = require('./guards');
 const { runGroqChat } = require('./llm/groq');
+const { MAX_TOOL_ITERATIONS, SIDE_EFFECT_TOOLS, filterRepeatedSideEffects } = require('./agent-limits');
+const { bump } = require('./metrics');
 
 // Tool definitions exposed to the LLM
 const TOOLS = [
@@ -383,16 +385,28 @@ async function runTurn(clientRecord, history, userMessage) {
   let totalOutput = response.usage?.output_tokens || 0;
   let isProvider  = false; // se activa si el LLM llamó marcar_proveedor
   let isPaymentEscalation = false; // se activa si el LLM llamó escalar_pago
+  let cappedOut   = false;
 
-  // Agentic loop — keep going while Groq wants to use tools
-  while (response.stop_reason === 'tool_use') {
+  const ranSideEffects = new Set(); // side-effect tools ya ejecutadas este turno
+
+  // Agentic loop — con tope duro de iteraciones (anti-spam / anti-quema de cuota)
+  for (let iter = 0; response.stop_reason === 'tool_use'; iter++) {
+    if (iter >= MAX_TOOL_ITERATIONS) {
+      cappedOut = true;
+      bump('loopCapHits');
+      console.warn('[conversation] tope de iteraciones de tools alcanzado', { telefono: clientRecord.telefono });
+      break;
+    }
+
     const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
-    const toolResults = [];
+    const { toRun, blocked } = filterRepeatedSideEffects(toolUseBlocks, ranSideEffects);
+    const toolResults = blocked.map(b => ({ type: 'tool_result', tool_use_id: b.tool_use_id, content: b.content }));
 
     const vehiculoCtx = [clientRecord.marca, clientRecord.modelo, clientRecord.anio].filter(Boolean).join(' ') || null;
-    for (const block of toolUseBlocks) {
+    for (const block of toRun) {
       if (block.name === 'marcar_proveedor') isProvider = true;
       if (block.name === 'escalar_pago') isPaymentEscalation = true;
+      if (SIDE_EFFECT_TOOLS.has(block.name)) ranSideEffects.add(block.name);
       const result = await executeTool(block.name, block.input, {
         telefono: clientRecord.telefono,
         nombre:   clientRecord.nombre,
@@ -421,7 +435,10 @@ async function runTurn(clientRecord, history, userMessage) {
   }
 
   const textBlock = response.content.find(b => b.type === 'text');
-  const raw = textBlock ? textBlock.text : 'Lo siento, no pude procesar tu mensaje.';
+  const raw = textBlock ? textBlock.text
+    : (cappedOut
+        ? 'Dame un momento, lo confirmo con el equipo y te escribo por aquí.'
+        : 'Lo siento, no pude procesar tu mensaje.');
   return {
     reply: stripMarkdown(raw),
     usage: { input: totalInput, output: totalOutput },

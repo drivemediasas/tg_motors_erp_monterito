@@ -23,10 +23,16 @@ async function enterSafeMode(telefono, error, context = {}) {
   console.error('[SAFE_MODE] technical alert suppressed; owner was not notified by WhatsApp');
 }
 
-/** Registra un handler global para promesas no capturadas → notifica (sin tumbar el server). */
+/**
+ * Red de seguridad global: loguea errores no capturados SIN tumbar el proceso.
+ * Un webhook debe seguir vivo aunque un turno individual falle feo.
+ */
 function installGlobalSafeNet() {
   process.on('unhandledRejection', (reason) => {
     console.error('[SAFE_MODE] unhandledRejection', { error: reason && reason.message ? reason.message : String(reason) });
+  });
+  process.on('uncaughtException', (err) => {
+    console.error('[SAFE_MODE] uncaughtException', { error: err && err.message ? err.message : String(err) });
   });
 }
 

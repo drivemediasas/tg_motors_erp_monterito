@@ -29,6 +29,21 @@ Actualizado: 2026-07-01
 ## Fallback de dedup sin message_id
 - Si el proveedor no envía `message_id`, se usa un hash `telefono+ventana10s+body`. Riesgo mínimo: dos mensajes idénticos del mismo número en la misma ventana de 10s podrían tratarse como duplicado.
 
+## Límites del loop agéntico (anti-spam)
+- El loop LLM ↔ herramientas está topado a **4 iteraciones** por turno (`src/agent-limits.js`). Si el modelo no llega a una respuesta final, el bot manda un mensaje neutro ("lo confirmo con el equipo") y corta. Se cuenta en `/health` → `metrics.loopCapHits`.
+- Cada herramienta con efecto externo (`alert_owner`, `consultar_precio`, `escalar_pago`, `book_appointment`, etc.) se ejecuta **máximo 1 vez por turno**.
+- Notificaciones al dueño vía `src/owner-notify.js`: misma causa → 1 sola cada `OWNER_NOTIFY_COOLDOWN_MS` (10 min); texto idéntico → 1 sola cada 60 min.
+
+## Watchdog de turno
+- `withLock` (`tools/lock.js`) corta cualquier turno que tarde más de `LOCK_TIMEOUT_MS` (45s): el cliente recibe un fallback y la cola de ese teléfono se libera. Un turno colgado no congela los mensajes siguientes.
+
+## LLM (Groq)
+- Primario `GROQ_MODEL`, respaldo automático `GROQ_FALLBACK_MODEL` ante timeout/429/5xx/`model_decommissioned`. Timeout duro `GROQ_TIMEOUT_MS` (20s). Rotar modelo = 1 variable (ver RUNBOOK).
+
+## Fast-path determinístico
+- Un dígito suelto ("1".."5") solo se interpreta como opción de menú si el bot **acaba de mostrar** el menú numerado (o es el primer contacto). En medio de otra conversación, el dígito lo maneja el LLM.
+- El bot **no** agenda citas por regex; agendar siempre pasa por el LLM + `book_appointment` con confirmación.
+
 ## Integraciones no conectadas
 - **Airtable**: variables presentes, sin uso en código.
 - **Google Calendar**: no implementado; el calendario es interno (tabla `disponibilidad`).
