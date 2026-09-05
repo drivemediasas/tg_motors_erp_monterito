@@ -11,7 +11,7 @@ const { bump } = require('../metrics');
  * tokens/min, más que suficiente para un asistente de WhatsApp y sin costo.
  *   LLM_API_KEY  = tu key de https://aistudio.google.com/apikey
  *   LLM_BASE_URL = https://generativelanguage.googleapis.com/v1beta/openai
- *   LLM_MODEL    = gemini-2.0-flash
+ *   LLM_MODEL    = gemini-3.6-flash
  *
  * Para Groq:
  *   LLM_BASE_URL = https://api.groq.com/openai/v1
@@ -21,8 +21,8 @@ const { bump } = require('../metrics');
 const API_KEY = (process.env.LLM_API_KEY || process.env.GROQ_API_KEY || '').replace(/\s/g, '');
 const BASE_URL = (process.env.LLM_BASE_URL || process.env.GROQ_BASE_URL
   || 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/+$/, '');
-const MODEL = process.env.LLM_MODEL || process.env.GROQ_MODEL || 'gemini-2.0-flash';
-const FALLBACK_MODEL = process.env.LLM_FALLBACK_MODEL || process.env.GROQ_FALLBACK_MODEL || 'gemini-2.0-flash-lite';
+const MODEL = process.env.LLM_MODEL || process.env.GROQ_MODEL || 'gemini-3.6-flash';
+const FALLBACK_MODEL = process.env.LLM_FALLBACK_MODEL || process.env.GROQ_FALLBACK_MODEL || 'gemini-3.6-flash';
 const TIMEOUT_MS = parseInt(process.env.LLM_TIMEOUT_MS || process.env.GROQ_TIMEOUT_MS || '25000', 10);
 
 function toOpenAiTools(tools) {

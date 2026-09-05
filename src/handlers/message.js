@@ -445,14 +445,13 @@ async function processMessageInner(phone, text, sendFn, meta = {}) {
 
   // ── Número del dueño (Diego) ────────────────────────────────────────────────
   // El WhatsApp del taller lo atiende la administradora; Diego usa este chat para
-  // hablar con ella. El bot NO debe meterse. Solo reacciona a:
-  //   · comandos del asesor: #humano / #bot / #proveedor / #cliente
-  //   · una respuesta CITANDO la notificación 📋 de una consulta de precio (relay)
-  // Cualquier otro texto de Diego → se guarda en historial y el bot calla.
+  // hablar con ella. El bot NO debe meterse NUNCA con Diego, salvo un comando
+  // explícito del asesor (#humano / #bot / #proveedor / #cliente).
+  // Que Diego cite/responda un mensaje en su chat NO es un comando.
   const ownerPhone = normalizePhone(process.env.OWNER_PHONE);
   if (ownerPhone && incomingPhone === ownerPhone) {
-    const isCommand = !!parseAdvisorCommand(text);
-    if (isCommand || meta.quotedId) {
+    const cmd = parseAdvisorCommand(text);
+    if (cmd) {
       return handleAdminMessage(phone, text, sendFn, meta);
     }
     const h = await getHistory(phone);
