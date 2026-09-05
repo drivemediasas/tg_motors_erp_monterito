@@ -39,7 +39,7 @@ const REPEAT_BLOCK_AT  = 3;   // block when the same message is sent this many t
 const AUTOMOTIVE_RE = [
   /\b(carro?|coche|veh[íi]culo|auto|moto(?:cicleta)?|camioneta|furg[oó]n|cami[oó]n|sed[aá]n|suv|4x4|pick[- ]?up)\b/i,
   /\b(motor|frenos?|aceite|filtro|buj[íi]a|llanta|neum[aá]tico|bater[íi]a|alternador|radiador|transmisi[oó]n|embrague|diferencial|suspensi[oó]n|alineaci[oó]n|balanceo|escape|catalizador|correa|distribuci[oó]n|amortiguador|carburador|turbo|inyecci[oó]n)\b/i,
-  /\b(taller|mec[aá]ni[co]a?|servicio|reparaci[oó]n|mantenimiento|diagn[oó]stico|cita|presupuesto|cotizaci[oó]n|garant[íi]a|repuesto|pieza|aceite|lavado|revisi[oó]n)\b/i,
+  /\b(taller|mec[aá]ni[co]a?|servicios?|reparaci[oó]n|mantenimiento|diagn[oó]stico|cita|presupuesto|cotizaci[oó]n|garant[íi]a|repuesto|pieza|aceite|lavado|revisi[oó]n)\b/i,
   /\b(tg motors|monterito|tgmotors)\b/i,
   /\b(horario|direcci[oó]n|ubicaci[oó]n|tel[eé]fono|whatsapp|contacto)\b/i,
   /\bplaca\b/i,
@@ -195,7 +195,7 @@ const STATIC_PATTERNS = [
   },
   {
     key: 'servicios',
-    re:  /\b(qu[eé] servicios|cu[aá]les servicios|qu[eé] tipo(s)? de servicio|ver (los )?servicios)\b/i,
+    re:  /\b(servicios?|qu[eé] servicios|cu[aá]les servicios|qu[eé] tipo(s)? de servicio|ver (los )?servicios)\b/i,
   },
 ];
 
@@ -224,8 +224,13 @@ function _buildStaticCache() {
 
 let _cacheBuilt = false;
 
+const MENU_NUMBER_KEYS = { '1': 'horario', '2': 'direccion', '3': 'servicios' };
+
 function getStaticResponse(text) {
   if (!_cacheBuilt) { _buildStaticCache(); _cacheBuilt = true; }
+  const direct = String(text || '').trim().toLowerCase();
+  if (_staticCache.has(direct)) return _staticCache.get(direct) || null;
+  if (MENU_NUMBER_KEYS[direct]) return _staticCache.get(MENU_NUMBER_KEYS[direct]) || null;
   for (const { key, re } of STATIC_PATTERNS) {
     if (re.test(text)) return _staticCache.get(key) || null;
   }

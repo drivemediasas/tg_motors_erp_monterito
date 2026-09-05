@@ -9,7 +9,7 @@ const axios = require('axios');
  * @param {Array}  params       - array of string values for template placeholders
  */
 async function sendTemplate(to, templateName, params = []) {
-  const provider = process.env.WHATSAPP_PROVIDER || 'wati';
+  const provider = process.env.WHATSAPP_PROVIDER || '360dialog';
 
   if (provider === 'wati') {
     return sendWatiTemplate(to, templateName, params);

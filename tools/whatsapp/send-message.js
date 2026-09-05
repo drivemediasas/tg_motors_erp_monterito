@@ -4,7 +4,7 @@ const d360Service = require('./360dialog-service');
 
 /**
  * Send a free-form text message via the WhatsApp provider.
- * Supports WATI (default), Twilio, respond.io and 360dialog — set WHATSAPP_PROVIDER to switch.
+ * Supports 360dialog (default), WATI, Twilio and respond.io — set WHATSAPP_PROVIDER to switch.
  *
  * @param {string} to      - recipient phone number (international format, no +)
  * @param {string} message - text to send
@@ -18,7 +18,7 @@ async function sendMessage(to, message, opts = {}) {
     return null;
   }
 
-  const provider = process.env.WHATSAPP_PROVIDER || 'wati';
+  const provider = process.env.WHATSAPP_PROVIDER || '360dialog';
 
   if (provider === 'wati') {
     return sendWati(to, message);

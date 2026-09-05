@@ -28,27 +28,58 @@ const {
   logBlock,
 } = require('../guards');
 const { getPrecioEstandar } = require('../../tools/db/precios-estandar');
+const { createAppointment } = require('../../tools/db/create-appointment');
+const { getServiceDuration } = require('../../tools/db/service-durations');
 
 function isLLMTransientError(err) {
   const msg = String(err?.message || err || '');
   return /quota exceeded|resource_exhausted|429|rate limits|free_tier_requests|Groq API error|fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout/i.test(msg);
 }
 
-function makeFallbackReply(text) {
-  const t = String(text || '').toLowerCase();
-  if (/\b(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches)\b/i.test(t)) {
-    return 'Hola 👋 Gracias por escribir a TG Motors. Cuéntame qué necesitas y te ayudo con horario, servicios, agendado o precios.';
-  }
-  if (/\b(horario|abren|cierran|atienden)\b/i.test(t)) {
-    return `Nuestro horario de atención es: ${process.env.SHOP_HOURS || 'Lunes a Viernes 8:30-17:30, Sábados 9:00-16:00'}. ¿Deseas agendar una cita?`;
-  }
-  if (/\b(agendar|cita|reservar|turno)\b/i.test(t)) {
+function buildMainMenu(name = 'hola') {
+  const shopName = process.env.SHOP_NAME || 'TG Motors';
+  const shopHours = process.env.SHOP_HOURS || 'Lunes a Viernes 8:30-17:30, Sábados 9:00-16:00';
+  return (
+    `Hola ${name} 👋 Soy Monterito, asistente de ${shopName}.\n\n` +
+    `Puedo ayudarte con:\n` +
+    `1) Horario\n` +
+    `2) Dirección\n` +
+    `3) Servicios\n` +
+    `4) Precio de un servicio\n` +
+    `5) Agendar una cita\n\n` +
+    `Responde con el número o con tu pregunta directa.\n\n` +
+    `Horario: ${shopHours}`
+  );
+}
+
+function resolveContextualReply(text, clientName = 'hola') {
+  const cached = getStaticResponse(text);
+  if (cached) return cached;
+
+  const norm = normalizeTextForMatch(text);
+  if (/^5$/.test(norm) || /\b(agendar|cita|reservar|turno|agenda)\b/.test(norm)) {
     return 'Perfecto, te ayudo a agendar. Envíame por favor el servicio que necesitas, la fecha preferida y la hora aproximada.';
   }
-  if (/\b(precio|cu[aá]nto|c[uú]esta|cobran|valor)\b/i.test(t)) {
+  if (/^4$/.test(norm) || /\b(precio|cuanto|cuesta|cobran|valor)\b/.test(norm)) {
     return 'Para darte el precio exacto necesito revisar tu vehículo o el servicio específico. Envíame marca, modelo y año, y te ayudo enseguida.';
   }
-  return 'Te leo. Cuéntame qué necesita tu vehículo o qué te gustaría agendar y te ayudo enseguida.';
+  if (/\b(hola|buenas|buenos dias|buenas tardes|buenas noches)\b/.test(norm)) {
+    return buildMainMenu(clientName.split(' ')[0]);
+  }
+  return `${buildMainMenu(clientName.split(' ')[0])}\n\nPara avanzar rápido, también puedes escribir algo como: cambio de aceite el lunes a las 9am.`;
+}
+
+function makeFallbackReply(text) {
+  return resolveContextualReply(text, 'hola');
+}
+
+function isWeakGenericReply(reply) {
+  const norm = normalizeTextForMatch(reply);
+  return (
+    /\bte leo\b/.test(norm) ||
+    /\bcuentame que necesita tu vehiculo\b/.test(norm) ||
+    /\bque te gustaria agendar\b/.test(norm)
+  );
 }
 
 function parsePayload(body) {
@@ -87,27 +118,186 @@ function getAdminPhones() {
   return new Set(raw.map(normalizePhone).filter(Boolean));
 }
 
+function normalizeTextForMatch(text) {
+  return String(text || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function parseTime(text) {
+  const t = normalizeTextForMatch(text);
+  let m = t.match(/\b([01]?\d|2[0-3])[:.]([0-5]\d)\s*(am|pm)?\b/);
+  if (m) {
+    let h = parseInt(m[1], 10);
+    const min = m[2];
+    const ampm = m[3];
+    if (ampm === 'pm' && h < 12) h += 12;
+    if (ampm === 'am' && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${min}`;
+  }
+  m = t.match(/\b([0-9]{1,2})\s*(am|pm)\b/);
+  if (m) {
+    let h = parseInt(m[1], 10);
+    const ampm = m[2];
+    if (ampm === 'pm' && h < 12) h += 12;
+    if (ampm === 'am' && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:00`;
+  }
+  return null;
+}
+
+function parseRelativeDate(text) {
+  const t = normalizeTextForMatch(text);
+  const today = new Date();
+  const dayMap = {
+    domingo: 0,
+    lunes: 1,
+    martes: 2,
+    miercoles: 3,
+    jueves: 4,
+    viernes: 5,
+    sabado: 6,
+  };
+  for (const [name, dow] of Object.entries(dayMap)) {
+    if (new RegExp(`\\b${name}\\b`).test(t)) {
+      const result = new Date(today);
+      const currentDow = today.getDay();
+      let delta = dow - currentDow;
+      if (delta <= 0) delta += 7;
+      result.setDate(today.getDate() + delta);
+      return result.toISOString().slice(0, 10);
+    }
+  }
+  const iso = t.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+  if (iso) return iso[1];
+  return null;
+}
+
+function inferService(text) {
+  const t = normalizeTextForMatch(text);
+  const rules = [
+    ['cambio de aceite', 'cambio de aceite'],
+    ['aceite', 'cambio de aceite'],
+    ['frenos', 'inspección de frenos'],
+    ['alineacion', 'alineación'],
+    ['diagnostico', 'diagnóstico de motor'],
+    ['motor', 'diagnóstico de motor'],
+    ['filtro', 'cambio de filtros'],
+    ['mantenimiento', 'mantenimiento general'],
+    ['lavada', 'lavada'],
+    ['lavado', 'lavada'],
+  ];
+  for (const [needle, service] of rules) {
+    if (t.includes(needle)) return service;
+  }
+  return null;
+}
+
+async function tryAutoBookAppointment(phone, text, sendFn) {
+  const service = inferService(text);
+  const fecha = parseRelativeDate(text);
+  const hora = parseTime(text);
+  if (!service || !fecha || !hora) return false;
+
+  const client = await getClient(phone);
+  const nombreCliente = client?.nombre || 'Cliente';
+  const telefono = phone;
+  const slot = await pool.query(
+    `SELECT id, tecnico FROM disponibilidad
+      WHERE fecha = $1 AND TO_CHAR(hora,'HH24:MI') = $2 AND disponible = true
+      ORDER BY id LIMIT 1`,
+    [fecha, hora]
+  );
+  if (!slot.rows.length) {
+    await sendFn(`No tengo libre ${fecha} a las ${hora}. Si quieres, te ayudo a buscar otro horario.`);
+    return true;
+  }
+
+  const cita = await createAppointment({
+    nombreCliente,
+    telefono,
+    servicio,
+    fecha,
+    hora,
+    slotRecordId: slot.rows[0].id,
+    notas: 'Agendada por WhatsApp',
+  });
+
+  try {
+    const horas = getServiceDuration(service);
+    await pool.query(
+      'UPDATE citas SET tiempo_estimado = $1, tecnico = COALESCE($2, tecnico) WHERE id = $3',
+      [horas, slot.rows[0].tecnico || null, cita.id]
+    );
+  } catch (e) {
+    console.warn('[auto-book] no se pudo guardar duración/técnico:', e.message);
+  }
+
+  await sendFn(
+    `Cita confirmada ✅\n\n` +
+    `• Servicio: ${cita.servicio}\n` +
+    `• Fecha: ${cita.fecha}\n` +
+    `• Hora: ${cita.hora}\n` +
+    `• Cliente: ${cita.nombreCliente}\n\n` +
+    `Si deseas cambiarla, me dices y te ayudo.`
+  );
+  return true;
+}
+
 async function handleQuickReply(phone, text, sendFn) {
   const t = String(text || '').trim();
-  const norm = t.toLowerCase();
+  const norm = normalizeTextForMatch(t);
   if (!t) return false;
+
+  if (await tryAutoBookAppointment(phone, t, sendFn)) {
+    return true;
+  }
+
+  if (/^1$/.test(norm) || /\b(horario)\b/i.test(t)) {
+    await sendFn(getStaticResponse('horario') || `Nuestro horario de atención es: ${process.env.SHOP_HOURS || 'Lunes a Viernes 8:30-17:30, Sábados 9:00-16:00'}.`);
+    return true;
+  }
+  if (/^2$/.test(norm) || /\b(direccion|ubicacion)\b/i.test(norm)) {
+    await sendFn(getStaticResponse('direccion') || 'Escríbenos y te damos indicaciones para llegar a TG Motors.');
+    return true;
+  }
+  if (/^3$/.test(norm) || /\b(servicios?)\b/i.test(norm)) {
+    await sendFn(getStaticResponse('servicios') || 'En TG Motors ofrecemos mantenimiento, diagnóstico y reparación de vehículos.');
+    return true;
+  }
+  if (/^4$/.test(norm) || /\b(precio|c[úu]anto|cobran|valor)\b/i.test(norm)) {
+    const price = await getPrecioEstandar('cambio de aceite');
+    if (price) {
+      await sendFn(`El precio estándar de ${price.servicio} es $${parseFloat(price.precio).toFixed(2)}${price.nota ? ` (${price.nota})` : ''}.`);
+      return true;
+    }
+    await sendFn('Para darte el precio exacto necesito revisar tu vehículo o el servicio específico.');
+    return true;
+  }
+  if (/^5$/.test(norm) || /\b(agendar|cita|reservar|turno|agenda)\b/i.test(norm)) {
+    const client = await getClient(phone);
+    const name = client?.nombre?.split(' ')[0] || 'hola';
+    const hasVehicle = !!(client?.marca || client?.modelo || client?.anio || client?.placa);
+    const vehicleText = hasVehicle
+      ? `Veo que registraste un vehículo: ${[client.marca, client.modelo, client.anio].filter(Boolean).join(' ')}${client.placa ? `, placa ${client.placa}` : ''}.`
+      : 'Aún no tengo tus datos de vehículo.';
+
+    await sendFn(
+      `Perfecto ${name} 👌 vamos a agendar tu cita.\n\n` +
+      `${vehicleText}\n\n` +
+      `Envíame por favor:\n` +
+      `• El servicio que necesitas\n` +
+      `• La fecha que prefieres\n` +
+      `• La hora aproximada\n\n` +
+      `Si ya me dices todo junto, mejor todavía.`
+    );
+    return true;
+  }
 
   const isGreeting = /\b(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|hello|hi)\b/i.test(t);
   if (isGreeting) {
     const name = (await getClient(phone))?.nombre?.split(' ')[0] || 'hola';
-    const shopName = process.env.SHOP_NAME || 'TG Motors';
-    const shopHours = process.env.SHOP_HOURS || 'Lunes a Viernes 8:30-17:30, Sábados 9:00-16:00';
-    await sendFn(
-      `Hola ${name} 👋 Soy Monterito, asistente de ${shopName}.\n\n` +
-      `Puedo ayudarte con:\n` +
-      `• Horario\n` +
-      `• Dirección\n` +
-      `• Servicios\n` +
-      `• Precio de un servicio\n` +
-      `• Agendar una cita\n\n` +
-      `Horario: ${shopHours}\n\n` +
-      `Dime qué necesitas y te ayudo de una.`
-    );
+    await sendFn(`${buildMainMenu(name)}\n\nDime qué necesitas y te ayudo de una.`);
     return true;
   }
 
@@ -553,13 +743,17 @@ async function processMessageInner(phone, text, sendFn, meta = {}) {
     return;
   }
 
-  await sendFn(reply);
-  console.log(`[outbound] ${phone}: ${reply.slice(0, 80)}...`);
+  const finalReply = isWeakGenericReply(reply)
+    ? resolveContextualReply(text, clientRecord.nombre || 'hola')
+    : reply;
+
+  await sendFn(finalReply);
+  console.log(`[outbound] ${phone}: ${finalReply.slice(0, 80)}...`);
 
   await appendMessage({
     telefono: phone, paso: 'activo',
     servicioElegido: history?.servicioElegido || null,
-    newMessages: [{ role: 'user', content: text }, { role: 'assistant', content: reply }],
+    newMessages: [{ role: 'user', content: text }, { role: 'assistant', content: finalReply }],
     existingRecordId,
   });
 
