@@ -83,9 +83,12 @@ function toOpenAiMessages(messages) {
 
     if (message.role === 'assistant') {
       const assistantMessage = { role: 'assistant' };
-      if (textParts.length) assistantMessage.content = textParts.join('\n');
-      if (toolCalls.length) assistantMessage.tool_calls = toolCalls;
-      if (!assistantMessage.content && !assistantMessage.tool_calls) assistantMessage.content = '';
+      if (toolCalls.length) {
+        assistantMessage.tool_calls = toolCalls;
+        assistantMessage.content = textParts.length ? textParts.join('\n') : null; // Gemini exige content:null, no ""
+      } else {
+        assistantMessage.content = textParts.join('\n');
+      }
       converted.push(assistantMessage);
       continue;
     }
@@ -137,14 +140,17 @@ async function callOnce({ model, payloadBase }) {
   const choice = data.choices?.[0]?.message || {};
   const content = [];
   if (choice.content) content.push({ type: 'text', text: choice.content });
-  for (const call of choice.tool_calls || []) {
+  (choice.tool_calls || []).forEach((call, i) => {
     content.push({
       type: 'tool_use',
-      id: call.id,
+      // Gemini (compat OpenAI) a veces NO devuelve `id` en los tool calls.
+      // Si falta, generamos uno estable: se usa igual en el mensaje del assistant
+      // y en el tool_result, así el proveedor puede emparejarlos (si no, 400).
+      id: call.id || `call_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 8)}`,
       name: call.function?.name,
       input: safeJsonParse(call.function?.arguments),
     });
-  }
+  });
 
   return {
     content,
@@ -197,4 +203,4 @@ async function runGroqChat({ system, tools, messages, maxTokens, temperature = 0
   }
 }
 
-module.exports = { runGroqChat, GROQ_MODEL: MODEL, GROQ_FALLBACK_MODEL: FALLBACK_MODEL, isTransientGroqError: isTransientError, LLM_MODEL: MODEL };
+module.exports = { runGroqChat, GROQ_MODEL: MODEL, GROQ_FALLBACK_MODEL: FALLBACK_MODEL, isTransientGroqError: isTransientError, LLM_MODEL: MODEL, toOpenAiMessages, toOpenAiTools };

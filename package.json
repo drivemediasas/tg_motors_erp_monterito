@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node tools/test/control.test.js && node tools/test/isolation.test.js && node tools/test/agent-limits.test.js && node tools/test/owner-notify.test.js && node tools/test/quick-reply.test.js && node tools/test/flow-sim.test.js"
+    "test": "node tools/test/control.test.js && node tools/test/isolation.test.js && node tools/test/agent-limits.test.js && node tools/test/owner-notify.test.js && node tools/test/quick-reply.test.js && node tools/test/flow-sim.test.js && node tools/test/llm-format.test.js"
   },
   "engines": {
     "node": ">=18.0.0"

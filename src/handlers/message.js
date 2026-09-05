@@ -32,7 +32,9 @@ const { bump } = require('../metrics');
 
 function isLLMTransientError(err) {
   const msg = String(err?.message || err || '');
-  return /quota exceeded|resource_exhausted|429|rate limits|free_tier_requests|Groq API error|fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout/i.test(msg);
+  // Cualquier fallo del LLM (rate limit, 4xx/5xx del proveedor, timeout, red) NO
+  // es un bug del bot → no dispara SAFE MODE. Se manda el fallback y se sigue.
+  return /LLM API error|LLM timeout|Groq API error|quota exceeded|resource_exhausted|invalid_argument|429|rate.?limit|free_tier_requests|fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout/i.test(msg);
 }
 
 function buildMainMenu(name = 'hola') {
