@@ -193,11 +193,11 @@ function inferService(text) {
   return null;
 }
 
-async function tryAutoBookAppointment(phone, text, sendFn) {
+async function tryAutoBookAppointment(phone, text) {
   const service = inferService(text);
   const fecha = parseRelativeDate(text);
   const hora = parseTime(text);
-  if (!service || !fecha || !hora) return false;
+  if (!service || !fecha || !hora) return null;
 
   const client = await getClient(phone);
   const nombreCliente = client?.nombre || 'Cliente';
@@ -209,8 +209,7 @@ async function tryAutoBookAppointment(phone, text, sendFn) {
     [fecha, hora]
   );
   if (!slot.rows.length) {
-    await sendFn(`No tengo libre ${fecha} a las ${hora}. Si quieres, te ayudo a buscar otro horario.`);
-    return true;
+    return `No tengo libre ${fecha} a las ${hora}. Si quieres, te ayudo a buscar otro horario.`;
   }
 
   const cita = await createAppointment({
@@ -233,46 +232,39 @@ async function tryAutoBookAppointment(phone, text, sendFn) {
     console.warn('[auto-book] no se pudo guardar duración/técnico:', e.message);
   }
 
-  await sendFn(
-    `Cita confirmada ✅\n\n` +
+  return `Cita confirmada ✅\n\n` +
     `• Servicio: ${cita.servicio}\n` +
     `• Fecha: ${cita.fecha}\n` +
     `• Hora: ${cita.hora}\n` +
     `• Cliente: ${cita.nombreCliente}\n\n` +
-    `Si deseas cambiarla, me dices y te ayudo.`
-  );
-  return true;
+    `Si deseas cambiarla, me dices y te ayudo.`;
 }
 
-async function handleQuickReply(phone, text, sendFn) {
+async function handleQuickReply(phone, text) {
   const t = String(text || '').trim();
   const norm = normalizeTextForMatch(t);
-  if (!t) return false;
+  if (!t) return null;
 
-  if (await tryAutoBookAppointment(phone, t, sendFn)) {
-    return true;
+  const bookedReply = await tryAutoBookAppointment(phone, t);
+  if (bookedReply) {
+    return bookedReply;
   }
 
   if (/^1$/.test(norm) || /\b(horario)\b/i.test(t)) {
-    await sendFn(getStaticResponse('horario') || `Nuestro horario de atención es: ${process.env.SHOP_HOURS || 'Lunes a Viernes 8:30-17:30, Sábados 9:00-16:00'}.`);
-    return true;
+    return getStaticResponse('horario') || `Nuestro horario de atención es: ${process.env.SHOP_HOURS || 'Lunes a Viernes 8:30-17:30, Sábados 9:00-16:00'}.`;
   }
   if (/^2$/.test(norm) || /\b(direccion|ubicacion)\b/i.test(norm)) {
-    await sendFn(getStaticResponse('direccion') || 'Escríbenos y te damos indicaciones para llegar a TG Motors.');
-    return true;
+    return getStaticResponse('direccion') || 'Escríbenos y te damos indicaciones para llegar a TG Motors.';
   }
   if (/^3$/.test(norm) || /\b(servicios?)\b/i.test(norm)) {
-    await sendFn(getStaticResponse('servicios') || 'En TG Motors ofrecemos mantenimiento, diagnóstico y reparación de vehículos.');
-    return true;
+    return getStaticResponse('servicios') || 'En TG Motors ofrecemos mantenimiento, diagnóstico y reparación de vehículos.';
   }
   if (/^4$/.test(norm) || /\b(precio|c[úu]anto|cobran|valor)\b/i.test(norm)) {
     const price = await getPrecioEstandar('cambio de aceite');
     if (price) {
-      await sendFn(`El precio estándar de ${price.servicio} es $${parseFloat(price.precio).toFixed(2)}${price.nota ? ` (${price.nota})` : ''}.`);
-      return true;
+      return `El precio estándar de ${price.servicio} es $${parseFloat(price.precio).toFixed(2)}${price.nota ? ` (${price.nota})` : ''}.`;
     }
-    await sendFn('Para darte el precio exacto necesito revisar tu vehículo o el servicio específico.');
-    return true;
+    return 'Para darte el precio exacto necesito revisar tu vehículo o el servicio específico.';
   }
   if (/^5$/.test(norm) || /\b(agendar|cita|reservar|turno|agenda)\b/i.test(norm)) {
     const client = await getClient(phone);
@@ -282,68 +274,37 @@ async function handleQuickReply(phone, text, sendFn) {
       ? `Veo que registraste un vehículo: ${[client.marca, client.modelo, client.anio].filter(Boolean).join(' ')}${client.placa ? `, placa ${client.placa}` : ''}.`
       : 'Aún no tengo tus datos de vehículo.';
 
-    await sendFn(
-      `Perfecto ${name} 👌 vamos a agendar tu cita.\n\n` +
+    return `Perfecto ${name} 👌 vamos a agendar tu cita.\n\n` +
       `${vehicleText}\n\n` +
       `Envíame por favor:\n` +
       `• El servicio que necesitas\n` +
       `• La fecha que prefieres\n` +
       `• La hora aproximada\n\n` +
-      `Si ya me dices todo junto, mejor todavía.`
-    );
-    return true;
+      `Si ya me dices todo junto, mejor todavía.`;
   }
 
   const isGreeting = /\b(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|hello|hi)\b/i.test(t);
   if (isGreeting) {
     const name = (await getClient(phone))?.nombre?.split(' ')[0] || 'hola';
-    await sendFn(`${buildMainMenu(name)}\n\nDime qué necesitas y te ayudo de una.`);
-    return true;
+    return `${buildMainMenu(name)}\n\nDime qué necesitas y te ayudo de una.`;
   }
 
   const cached = getStaticResponse(t);
   if (cached) {
-    await sendFn(cached);
-    return true;
-  }
-
-  if (/\b(agendar|cita|reservar|turno|agenda)\b/i.test(norm)) {
-    const client = await getClient(phone);
-    const name = client?.nombre?.split(' ')[0] || 'hola';
-    const hasVehicle = !!(client?.marca || client?.modelo || client?.anio || client?.placa);
-    const vehicleText = hasVehicle
-      ? `Veo que registraste un vehículo: ${[client.marca, client.modelo, client.anio].filter(Boolean).join(' ')}${client.placa ? `, placa ${client.placa}` : ''}.`
-      : 'Aún no tengo tus datos de vehículo.';
-
-    await sendFn(
-      `Perfecto ${name} 👌 vamos a agendar tu cita.\n\n` +
-      `${vehicleText}\n\n` +
-      `Envíame por favor:\n` +
-      `• El servicio que necesitas\n` +
-      `• La fecha que prefieres\n` +
-      `• La hora aproximada\n\n` +
-      `Si no sabes qué servicio poner, dime tu problema y yo te ayudo.`
-    );
-    return true;
+    return cached;
   }
 
   if (/\b(precio|cu[aá]nto|c[uú]esta|cobran|cobras|valor)\b/i.test(norm)) {
     const price = await getPrecioEstandar('cambio de aceite');
     if (price) {
-      await sendFn(
-        `El precio estándar de ${price.servicio} es $${parseFloat(price.precio).toFixed(2)}${price.nota ? ` (${price.nota})` : ''}.\n\n` +
-        `Si quieres, te ayudo también con horario, servicios o una cita.`
-      );
-      return true;
+      return `El precio estándar de ${price.servicio} es $${parseFloat(price.precio).toFixed(2)}${price.nota ? ` (${price.nota})` : ''}.\n\n` +
+        `Si quieres, te ayudo también con horario, servicios o una cita.`;
     }
-    await sendFn(
-      'Para darte el precio exacto necesito revisar tu vehículo o el servicio específico.\n\n' +
-      'Envíame la marca, modelo y año, y te ayudo enseguida.'
-    );
-    return true;
+    return 'Para darte el precio exacto necesito revisar tu vehículo o el servicio específico.\n\n' +
+      'Envíame la marca, modelo y año, y te ayudo enseguida.';
   }
 
-  return false;
+  return null;
 }
 
 /**
@@ -593,8 +554,18 @@ async function processMessageInner(phone, text, sendFn, meta = {}) {
       last_owner_change: new Date().toISOString(),
       last_human_activity: null,
     }).catch(() => {});
-    const quick = await handleQuickReply(phone, text, sendFn);
-    if (quick) return;
+    const quickReplyText = await handleQuickReply(phone, text);
+    if (quickReplyText) {
+      await sendFn(quickReplyText);
+      const h = await getHistory(phone);
+      await appendMessage({
+        telefono: phone, paso: 'activo',
+        servicioElegido: h?.servicioElegido || null,
+        newMessages: [{ role: 'user', content: text }, { role: 'assistant', content: quickReplyText }],
+        existingRecordId: h?.recordId || null,
+      });
+      return;
+    }
     console.log('[admin-test] bypass', { phone: incomingPhone });
     return handleAdminMessage(phone, text, sendFn, meta);
   }
@@ -606,7 +577,16 @@ async function processMessageInner(phone, text, sendFn, meta = {}) {
   }
 
   // Fast path for very common questions: avoids Gemini/tool failures entirely.
-  if (await handleQuickReply(phone, text, sendFn)) {
+  const quickReplyText = await handleQuickReply(phone, text);
+  if (quickReplyText) {
+    await sendFn(quickReplyText);
+    const h = await getHistory(phone);
+    await appendMessage({
+      telefono: phone, paso: 'activo',
+      servicioElegido: h?.servicioElegido || null,
+      newMessages: [{ role: 'user', content: text }, { role: 'assistant', content: quickReplyText }],
+      existingRecordId: h?.recordId || null,
+    });
     return;
   }
 
