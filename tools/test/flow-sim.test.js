@@ -86,6 +86,16 @@ async function test(name, fn) {
     assert.strictEqual(r.via, 'LLM', r.via);
   });
 
+  // ── Regresión: frase larga con "servicio" NO dispara el enlatado ─────────
+  await test('C-real  "Necesito un servicio de mantenimiento y arreglar la chapa..." → LLM', async () => {
+    const r = await botTurn(freshConvo(), 'Necesito un servicio de mantenimiento preventivo y arreglar la chapa de la puerta. Lunes 11 am');
+    assert.strictEqual(r.via, 'LLM', `${r.via}: ${r.reply}`);
+  });
+  await test('estático  "servicios" (corto) sí responde el enlatado', async () => {
+    const r = await botTurn(freshConvo(), 'servicios');
+    assert.strictEqual(r.via, 'quick-reply', r.via);
+  });
+
   // ── C5: un "2" que responde a otra pregunta NO da la dirección ────────────
   await test('C5  "2" respondiendo a "¿1 o 2 puertas?" → LLM (no dirección)', async () => {
     const cc = freshConvo([
