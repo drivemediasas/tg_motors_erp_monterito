@@ -443,21 +443,19 @@ async function processMessageInner(phone, text, sendFn, meta = {}) {
 
   const incomingPhone = normalizePhone(phone);
 
-  // ── Número del dueño (Diego) ────────────────────────────────────────────────
-  // El WhatsApp del taller lo atiende la administradora; Diego usa este chat para
-  // hablar con ella. El bot NO debe meterse NUNCA con Diego, salvo un comando
-  // explícito del asesor (#humano / #bot / #proveedor / #cliente).
-  // Que Diego cite/responda un mensaje en su chat NO es un comando.
+  // ── Número del dueño (Diego) → SILENCIO ABSOLUTO ────────────────────────────
+  // El WhatsApp del taller lo atiende la administradora; Diego usa este chat solo
+  // para hablar con ella. El bot NUNCA le responde nada a Diego. Se guarda el
+  // mensaje en el historial (por contexto) y se corta. Sin comandos, sin admin.
   const ownerPhone = normalizePhone(process.env.OWNER_PHONE);
-  if (ownerPhone && incomingPhone === ownerPhone) {
-    const cmd = parseAdvisorCommand(text);
-    if (cmd) {
-      return handleAdminMessage(phone, text, sendFn, meta);
-    }
+  const extraSilent = new Set(
+    String(process.env.SILENT_PHONES || '').split(',').map(normalizePhone).filter(Boolean)
+  );
+  if ((ownerPhone && incomingPhone === ownerPhone) || extraSilent.has(incomingPhone)) {
     const h = await getHistory(phone);
     await appendMessage({ telefono: phone, paso: 'owner_chat', servicioElegido: h?.servicioElegido || null,
       newMessages: [{ role: 'user', content: text }], existingRecordId: h?.recordId || null });
-    console.log('[owner] mensaje de Diego sin comando — bot en silencio', { phone });
+    console.log('[owner] mensaje del dueño/silenciado — bot NO responde', { phone });
     return;
   }
 
