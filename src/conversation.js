@@ -354,7 +354,7 @@ function stripMarkdown(text) {
  * @param {string} userMessage   - the new inbound text
  * @returns {string} Monterito's final reply
  */
-const MAX_REPLY_TOKENS = 500;
+const MAX_REPLY_TOKENS = 400; // respuestas de WhatsApp son cortas; menos presión de TPM
 
 /**
  * Run one full conversation turn.
