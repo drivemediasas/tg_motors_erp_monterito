@@ -26,7 +26,7 @@ const MAX_MSG_CHARS    = 1000;
 const RATE_PER_MIN     = 10;
 const RATE_PER_HOUR    = 100;
 const RATE_PER_DAY     = 500;
-const HISTORY_MAX_MSGS = 15;
+const HISTORY_MAX_MSGS = 8; // menos historial = menos tokens/llamada (límites de Groq)
 const REPEAT_BLOCK_AT  = 3;   // block when the same message is sent this many times
 
 // ─── Topic filter ─────────────────────────────────────────────────────────────

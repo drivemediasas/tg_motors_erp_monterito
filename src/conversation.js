@@ -357,7 +357,7 @@ function stripMarkdown(text) {
  * @param {string} userMessage   - the new inbound text
  * @returns {string} Monterito's final reply
  */
-const MAX_REPLY_TOKENS = 700;
+const MAX_REPLY_TOKENS = 500;
 
 /**
  * Run one full conversation turn.

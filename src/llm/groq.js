@@ -1,10 +1,11 @@
 const { bump } = require('../metrics');
 
 const GROQ_API_KEY = (process.env.GROQ_API_KEY || '').replace(/\s/g, '');
-// llama-3.3-70b-versatile: disponible en free tier, buen español y tool-use.
-// (moonshotai/kimi-k2-instruct fue dado de baja por Groq → model_not_found.)
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
-const GROQ_FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || 'llama-3.1-8b-instant';
+// openai/gpt-oss-*: vigentes en Groq (2026), buen español y tool-use.
+// El primario y el fallback deben ser modelos que EXISTAN para tu org — verificá
+// con: curl https://api.groq.com/openai/v1/models -H "Authorization: Bearer $GROQ_API_KEY"
+const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+const GROQ_FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || 'openai/gpt-oss-20b';
 const GROQ_BASE_URL = process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1';
 const GROQ_TIMEOUT_MS = parseInt(process.env.GROQ_TIMEOUT_MS || '20000', 10);
 
@@ -174,7 +175,19 @@ async function runGroqChat({ system, tools, messages, maxTokens, temperature = 0
   try {
     return await callGroqOnce({ model: GROQ_MODEL, payloadBase });
   } catch (err) {
-    if (!isTransientGroqError(err) || GROQ_FALLBACK_MODEL === GROQ_MODEL) throw err;
+    if (!isTransientGroqError(err)) throw err;
+
+    // Rate limit con "try again in Xs" corto → esperar y reintentar el MISMO modelo.
+    const m = /try again in ([\d.]+)s/i.exec(err.message || '');
+    const waitS = m ? parseFloat(m[1]) : 0;
+    if (waitS > 0 && waitS <= 8) {
+      console.warn(`[groq] rate limit; espero ${waitS}s y reintento ${GROQ_MODEL}`);
+      await new Promise(r => setTimeout(r, waitS * 1000 + 300));
+      try { return await callGroqOnce({ model: GROQ_MODEL, payloadBase }); }
+      catch (e2) { if (!isTransientGroqError(e2)) throw e2; }
+    }
+
+    if (GROQ_FALLBACK_MODEL === GROQ_MODEL) throw err;
     console.warn(`[groq] modelo primario falló (${err.message}); reintento con ${GROQ_FALLBACK_MODEL}`);
     bump('groqFallbackUsed');
     return await callGroqOnce({ model: GROQ_FALLBACK_MODEL, payloadBase });

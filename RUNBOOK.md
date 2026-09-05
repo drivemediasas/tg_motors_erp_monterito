@@ -22,7 +22,7 @@ Nota: el directorio del proyecto termina en espacio: `Workflow TG Motors ` (usar
 
 ## Variables de entorno
 Críticas: `DATABASE_URL`, `GROQ_API_KEY`, `WHATSAPP_PROVIDER=360dialog`, `D360_API_KEY`, `D360_WEBHOOK_SECRET`, `OWNER_PHONE` (número de Diego: `593987189276`), `DASHBOARD_EMAIL`, `DASHBOARD_PASSWORD`.
-LLM: `GROQ_MODEL` (default `llama-3.3-70b-versatile`), `GROQ_FALLBACK_MODEL` (default `llama-3.1-8b-instant`), `GROQ_TIMEOUT_MS=20000`.
+LLM: `GROQ_MODEL` (default `openai/gpt-oss-120b`), `GROQ_FALLBACK_MODEL` (default `openai/gpt-oss-20b`), `GROQ_TIMEOUT_MS=20000`.
 Config taller: `SHOP_NAME/CITY/ADDRESS/HOURS/SERVICES`, `SHOP_TECHNICIANS`, `SHOP_CAPACITY`, `GOOGLE_REVIEW_URL`, `OWNER_NAME`.
 Resiliencia (default): `HUMAN_TIMEOUT_MIN=20`, `LOCK_TIMEOUT_MS=45000`, `OWNER_NOTIFY_COOLDOWN_MS=600000`, `DB_POOL_MAX=10`, `BATCH_MS=1200`, `COEXISTENCE_ECHO_DETECT=off`, `REMINDER_TEMPLATE_NAME`.
 
