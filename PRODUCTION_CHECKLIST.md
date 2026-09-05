@@ -58,7 +58,8 @@ Actualizado: 2026-07-01 · Entorno: Railway `tg-motors-monterito` / production
 
 ## Pre-deploy (cada vez)
 - [ ] `npm test` local en verde
-- [ ] Variables Railway: `OWNER_PHONE=593987189276`, `ADMIN_PHONE=593999648041` (QA), `GROQ_API_KEY` seteada
+- [ ] Variables Railway: `OWNER_PHONE=593987189276` (Diego), `GROQ_API_KEY` con crédito/cuota vigente
+- [ ] Groq: verificar en https://console.groq.com que la key NO está sin cuota / rate-limited
 - [ ] 360dialog: el webhook apunta a **una sola** URL (`/webhook/360dialog`)
 - [ ] Tras `railway up`: `curl /health` 200 + `railway logs` sin `[SAFE_MODE]` en el arranque
 

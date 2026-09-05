@@ -3,6 +3,13 @@ const d360Service = require('../../tools/whatsapp/360dialog-service');
 const { getMediaAck } = require('../guards');
 const pool = require('../../tools/db/client');
 const { markProcessedDurable, fallbackId } = require('../../tools/db/messages-processed');
+const { takeOverByHuman } = require('../../tools/db/conversation-state');
+
+const normalizePhone = (p) => String(p || '').replace(/\D/g, '');
+// Detección de "la administradora respondió desde la app" (coexistence).
+// OFF por defecto hasta verificar el shape real del payload en producción:
+// setear COEXISTENCE_ECHO_DETECT=on en Railway para activarla.
+const ECHO_DETECT_ON = (process.env.COEXISTENCE_ECHO_DETECT || 'off').toLowerCase() === 'on';
 
 // In-memory dedup cache: prevents double-processing if 360dialog sends the same
 // messageId twice (edge case during network retries). Capped at 2000 entries to
@@ -45,6 +52,23 @@ function parseD360Payload(body) {
 
   if (!phone) return { ignore: true };
 
+  // ── ¿Es un mensaje SALIENTE del número del taller? (modo coexistence) ─────────
+  // En coexistence, 360dialog reenvía al webhook los mensajes que el equipo manda
+  // desde la app de WhatsApp. `from` == número propio del taller (metadata.display_phone_number).
+  // Ese caso NO es un cliente escribiendo: es la administradora respondiendo a mano.
+  const ownNumber = normalizePhone(value.metadata?.display_phone_number);
+  if (ownNumber && normalizePhone(phone) === ownNumber) {
+    const customer = normalizePhone(
+      msg.to || value.contacts?.[0]?.wa_id || value.statuses?.[0]?.recipient_id || ''
+    );
+    return {
+      agentOutbound: true,
+      messageId,
+      customer: customer || null,
+      textSnippet: (msg.text?.body || '').slice(0, 40),
+    };
+  }
+
   // Mensajes de texto → flujo normal con el LLM
   if (msg.type === 'text' && msg.text?.body) {
     return { phone, type: 'text', text: msg.text.body, name, messageId, quotedId };
@@ -73,6 +97,28 @@ async function handleD360Inbound(body) {
     return;
   }
 
+  // ── Mensaje saliente del número del taller (coexistence) ─────────────────────
+  if (parsed.agentOutbound) {
+    if (!ECHO_DETECT_ON) { console.log('[360dialog] agentOutbound ignorado (detección off)'); return; }
+    // Si lo mandó el bot por la API, es solo el eco de nuestra propia respuesta.
+    if (d360Service.wasSentByBot(parsed.messageId)) {
+      console.log('[360dialog] eco de mensaje del bot — ignorado');
+      return;
+    }
+    // Lo mandó un humano (la administradora) desde la app → callar al bot para ese cliente.
+    if (parsed.customer) {
+      try {
+        await takeOverByHuman(parsed.customer, 'admin', 'HUMAN');
+        console.log('[360dialog] respuesta humana detectada → bot en silencio', { customer: parsed.customer });
+      } catch (e) {
+        console.error('[360dialog] no se pudo pasar a HUMAN:', e.message);
+      }
+    } else {
+      console.warn('[360dialog] respuesta humana detectada pero sin número de cliente en el payload', { snippet: parsed.textSnippet });
+    }
+    return;
+  }
+
   const { phone, type, text, name, quotedId } = parsed;
   const messageId = parsed.messageId || fallbackId(phone, text);
 
@@ -85,7 +131,7 @@ async function handleD360Inbound(body) {
   try {
     const { duplicate } = await markProcessedDurable(pool, { messageId, telefono: phone, provider: '360dialog' });
     if (duplicate) {
-      console.warn('[360dialog] duplicate_webhook_ignored', { messageId, phone });
+      console.warn('[360dialog] duplicate_webhook_ignored', { messageId, phone, textSnippet: String(text || '').slice(0, 40), viaFallbackId: !parsed.messageId });
       return;
     }
   } catch (e) {
