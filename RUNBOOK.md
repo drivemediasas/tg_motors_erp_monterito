@@ -22,9 +22,9 @@ Nota: el directorio del proyecto termina en espacio: `Workflow TG Motors ` (usar
 
 ## Variables de entorno
 Críticas: `DATABASE_URL`, `LLM_API_KEY`, `WHATSAPP_PROVIDER=360dialog`, `D360_API_KEY`, `D360_WEBHOOK_SECRET`, `OWNER_PHONE` (número de Diego: `593987189276`), `DASHBOARD_EMAIL`, `DASHBOARD_PASSWORD`.
-LLM (default = Gemini free tier, 1M tokens/min): `LLM_API_KEY` (key gratis: https://aistudio.google.com/apikey), `LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai`, `LLM_MODEL=gemini-2.0-flash`, `LLM_FALLBACK_MODEL=gemini-2.0-flash-lite`. Para Groq: `LLM_BASE_URL=https://api.groq.com/openai/v1`, `LLM_MODEL=openai/gpt-oss-120b`. Los nombres viejos `GROQ_*` siguen funcionando.
+LLM (default = Groq free): `LLM_API_KEY` (https://console.groq.com), `LLM_BASE_URL=https://api.groq.com/openai/v1`, `LLM_MODEL=openai/gpt-oss-20b`, `LLM_FALLBACK_MODEL=openai/gpt-oss-120b`. Free = ~30 req/min, 8k tokens/min. Si se satura con varios clientes: pay-as-you-go en Groq, o Cerebras (`LLM_BASE_URL=https://api.cerebras.ai/v1`, `LLM_MODEL=gpt-oss-120b`, con billing activo). **NO usar Gemini con herramientas** (2.5/3.x exigen thought_signature → 400). Nombres viejos `GROQ_*` siguen funcionando.
 Config taller: `SHOP_NAME/CITY/ADDRESS/HOURS/SERVICES`, `SHOP_TECHNICIANS`, `SHOP_CAPACITY`, `GOOGLE_REVIEW_URL`, `OWNER_NAME`.
-Resiliencia (default): `HUMAN_TIMEOUT_MIN=20`, `LOCK_TIMEOUT_MS=45000`, `OWNER_NOTIFY_COOLDOWN_MS=600000`, `DB_POOL_MAX=10`, `BATCH_MS=1200`, `COEXISTENCE_ECHO_DETECT=off`, `REMINDER_TEMPLATE_NAME`.
+Resiliencia (default): `HUMAN_TIMEOUT_MIN=20`, `LOCK_TIMEOUT_MS=90000`, `OWNER_NOTIFY_COOLDOWN_MS=600000`, `DB_POOL_MAX=10`, `BATCH_MS=1200`, `COEXISTENCE_ECHO_DETECT=on`, `REMINDER_TEMPLATE_NAME`.
 
 ## Quién habla con quién
 - El bot **solo** conversa con **clientes** del taller.
@@ -39,7 +39,7 @@ Resiliencia (default): `HUMAN_TIMEOUT_MIN=20`, `LOCK_TIMEOUT_MS=45000`, `OWNER_N
   `OWNER_PHONE` y se comporta 100% como cliente.
 
 ## Activar detección de respuesta humana (coexistence)
-1. Con `COEXISTENCE_ECHO_DETECT=off` (default), pedir a alguien que responda a un cliente desde la
+1. Con `COEXISTENCE_ECHO_DETECT=on` (default), pedir a alguien que responda a un cliente desde la
    app de WhatsApp del taller y capturar en `railway logs` la línea `[360dialog] webhook received`
    y el evento asociado (necesitamos ver `metadata.display_phone_number`, `messages[0].from`,
    `messages[0].id` y a quién iba dirigido).

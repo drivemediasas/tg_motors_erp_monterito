@@ -9,7 +9,7 @@ if (!LLM_API_KEY) {
   process.exit(1);
 }
 const { LLM_MODEL } = require('./llm/groq');
-const _llmBase = process.env.LLM_BASE_URL || process.env.GROQ_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai';
+const _llmBase = process.env.LLM_BASE_URL || process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1';
 console.log(`[startup] LLM: ${_llmBase} | model: ${LLM_MODEL} | key: ${LLM_API_KEY.slice(0, 10)}...`);
 
 const express    = require('express');

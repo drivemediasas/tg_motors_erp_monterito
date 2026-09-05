@@ -7,22 +7,25 @@ const { bump } = require('../metrics');
  *   LLM_API_KEY / LLM_BASE_URL / LLM_MODEL / LLM_FALLBACK_MODEL / LLM_TIMEOUT_MS
  *   (con fallback a los nombres viejos GROQ_* para no romper despliegues previos)
  *
- * Por defecto: Google Gemini (endpoint compatible OpenAI) — free tier con 1M
- * tokens/min, más que suficiente para un asistente de WhatsApp y sin costo.
- *   LLM_API_KEY  = tu key de https://aistudio.google.com/apikey
- *   LLM_BASE_URL = https://generativelanguage.googleapis.com/v1beta/openai
- *   LLM_MODEL    = gemini-2.0-flash
- *
- * Para Groq:
+ * DEFAULT: Groq — free tier sin tarjeta (~30 req/min, 8k tokens/min), tool-use
+ * sólido por OpenAI-compat. openai/gpt-oss-20b verificado funcionando en la cuenta.
+ *   LLM_API_KEY  = key de https://console.groq.com
  *   LLM_BASE_URL = https://api.groq.com/openai/v1
- *   LLM_MODEL    = openai/gpt-oss-120b   (o el que corresponda)
+ *   LLM_MODEL    = openai/gpt-oss-20b
+ *   LLM_FALLBACK_MODEL = openai/gpt-oss-120b
+ *
+ * Alternativas (cambiar LLM_BASE_URL + LLM_MODEL + LLM_API_KEY):
+ *   Cerebras (pay-as-you-go, sin tope de req/min): https://api.cerebras.ai/v1 + gpt-oss-120b
+ *   NO usar Gemini con herramientas (2.5 y 3.x exigen thought_signature → 400).
  */
 
 const API_KEY = (process.env.LLM_API_KEY || process.env.GROQ_API_KEY || '').replace(/\s/g, '');
 const BASE_URL = (process.env.LLM_BASE_URL || process.env.GROQ_BASE_URL
-  || 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/+$/, '');
-const MODEL = process.env.LLM_MODEL || process.env.GROQ_MODEL || 'gemini-2.0-flash';
-const FALLBACK_MODEL = process.env.LLM_FALLBACK_MODEL || process.env.GROQ_FALLBACK_MODEL || 'gemini-2.0-flash-lite';
+  || 'https://api.groq.com/openai/v1').replace(/\/+$/, '');
+const MODEL = process.env.LLM_MODEL || process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+// Mismo modelo por defecto: no asumimos que otro esté habilitado en el proyecto.
+// (openai/gpt-oss-120b suele estar bloqueado a nivel de proyecto en Groq.)
+const FALLBACK_MODEL = process.env.LLM_FALLBACK_MODEL || process.env.GROQ_FALLBACK_MODEL || MODEL;
 const TIMEOUT_MS = parseInt(process.env.LLM_TIMEOUT_MS || process.env.GROQ_TIMEOUT_MS || '25000', 10);
 
 function toOpenAiTools(tools) {
@@ -83,9 +86,12 @@ function toOpenAiMessages(messages) {
 
     if (message.role === 'assistant') {
       const assistantMessage = { role: 'assistant' };
-      if (textParts.length) assistantMessage.content = textParts.join('\n');
-      if (toolCalls.length) assistantMessage.tool_calls = toolCalls;
-      if (!assistantMessage.content && !assistantMessage.tool_calls) assistantMessage.content = '';
+      if (toolCalls.length) {
+        assistantMessage.tool_calls = toolCalls;
+        assistantMessage.content = textParts.length ? textParts.join('\n') : null; // Gemini exige content:null, no ""
+      } else {
+        assistantMessage.content = textParts.join('\n');
+      }
       converted.push(assistantMessage);
       continue;
     }
@@ -137,14 +143,17 @@ async function callOnce({ model, payloadBase }) {
   const choice = data.choices?.[0]?.message || {};
   const content = [];
   if (choice.content) content.push({ type: 'text', text: choice.content });
-  for (const call of choice.tool_calls || []) {
+  (choice.tool_calls || []).forEach((call, i) => {
     content.push({
       type: 'tool_use',
-      id: call.id,
+      // Gemini (compat OpenAI) a veces NO devuelve `id` en los tool calls.
+      // Si falta, generamos uno estable: se usa igual en el mensaje del assistant
+      // y en el tool_result, así el proveedor puede emparejarlos (si no, 400).
+      id: call.id || `call_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 8)}`,
       name: call.function?.name,
       input: safeJsonParse(call.function?.arguments),
     });
-  }
+  });
 
   return {
     content,
@@ -173,7 +182,11 @@ async function runGroqChat({ system, tools, messages, maxTokens, temperature = 0
     tools: toOpenAiTools(tools),
     tool_choice: 'auto',
     temperature,
-    max_tokens: maxTokens,
+    // Los modelos gpt-oss razonan antes de responder y esos tokens cuentan.
+    // "low" reduce el gasto sin perder calidad para un bot de atención simple.
+    // Headroom extra en max_tokens para que el razonamiento no trunque la respuesta.
+    max_tokens: Math.max(maxTokens, 700),
+    ...(/gpt-oss/i.test(MODEL) ? { reasoning_effort: 'low' } : {}),
   };
 
   try {
@@ -181,11 +194,14 @@ async function runGroqChat({ system, tools, messages, maxTokens, temperature = 0
   } catch (err) {
     if (!isTransientError(err)) throw err;
 
+    // Rate limit con "try again in Xs": si es una espera razonable, aguantamos y
+    // reintentamos el MISMO modelo (mejor 25s lento que un error o el menú).
+    // El watchdog del turno es 90s, así que hay margen.
     const m = /try again in ([\d.]+)s/i.exec(err.message || '');
     const waitS = m ? parseFloat(m[1]) : 0;
-    if (waitS > 0 && waitS <= 8) {
+    if (waitS > 0 && waitS <= 28) {
       console.warn(`[llm] rate limit; espero ${waitS}s y reintento ${MODEL}`);
-      await new Promise(r => setTimeout(r, waitS * 1000 + 300));
+      await new Promise(r => setTimeout(r, waitS * 1000 + 500));
       try { return await callOnce({ model: MODEL, payloadBase }); }
       catch (e2) { if (!isTransientError(e2)) throw e2; }
     }
@@ -197,4 +213,4 @@ async function runGroqChat({ system, tools, messages, maxTokens, temperature = 0
   }
 }
 
-module.exports = { runGroqChat, GROQ_MODEL: MODEL, GROQ_FALLBACK_MODEL: FALLBACK_MODEL, isTransientGroqError: isTransientError, LLM_MODEL: MODEL };
+module.exports = { runGroqChat, GROQ_MODEL: MODEL, GROQ_FALLBACK_MODEL: FALLBACK_MODEL, isTransientGroqError: isTransientError, LLM_MODEL: MODEL, toOpenAiMessages, toOpenAiTools };

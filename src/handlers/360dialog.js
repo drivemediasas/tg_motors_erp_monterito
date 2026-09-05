@@ -6,10 +6,11 @@ const { markProcessedDurable, fallbackId } = require('../../tools/db/messages-pr
 const { takeOverByHuman } = require('../../tools/db/conversation-state');
 
 const normalizePhone = (p) => String(p || '').replace(/\D/g, '');
-// Detección de "la administradora respondió desde la app" (coexistence).
-// OFF por defecto hasta verificar el shape real del payload en producción:
-// setear COEXISTENCE_ECHO_DETECT=on en Railway para activarla.
-const ECHO_DETECT_ON = (process.env.COEXISTENCE_ECHO_DETECT || 'off').toLowerCase() === 'on';
+// Detección de "la administradora respondió al cliente desde la app de WhatsApp"
+// (coexistence). ON por defecto: si el equipo responde a un cliente, el bot se
+// calla 20 min para ese cliente (HUMAN_TIMEOUT_MIN). Se distingue del eco de la
+// propia respuesta del bot con wasSentByBot(). Apagable con COEXISTENCE_ECHO_DETECT=off.
+const ECHO_DETECT_ON = (process.env.COEXISTENCE_ECHO_DETECT || 'on').toLowerCase() !== 'off';
 
 // In-memory dedup cache: prevents double-processing if 360dialog sends the same
 // messageId twice (edge case during network retries). Capped at 2000 entries to

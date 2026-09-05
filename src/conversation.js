@@ -22,21 +22,18 @@ const { bump } = require('./metrics');
 const TOOLS = [
   {
     name: 'check_availability',
-    description: 'Consulta los horarios disponibles para citas en los próximos días.',
+    description: 'Horarios libres para citas en los próximos días.',
     input_schema: {
       type: 'object',
       properties: {
-        dias: {
-          type: 'number',
-          description: 'Cuántos días hacia adelante consultar (default 7)',
-        },
+        dias: { type: 'number', description: 'Días hacia adelante (default 7)' },
       },
       required: [],
     },
   },
   {
     name: 'book_appointment',
-    description: 'Reserva una cita para el cliente. Llama solo después de confirmar fecha, hora y servicio con el cliente.',
+    description: 'Reserva la cita. Solo tras confirmar servicio, fecha y hora con el cliente.',
     input_schema: {
       type: 'object',
       properties: {
@@ -53,7 +50,7 @@ const TOOLS = [
   },
   {
     name: 'alert_owner',
-    description: 'Envía una alerta urgente al dueño del taller cuando el cliente tiene una emergencia o necesita una wincha. Úsalo inmediatamente al detectar cualquier situación de emergencia.',
+    description: 'Alerta al equipo por una emergencia REAL fuera del taller (grúa, wincha, varado en la vía, accidente, no arranca en carretera).',
     input_schema: {
       type: 'object',
       properties: {
@@ -65,7 +62,7 @@ const TOOLS = [
   },
   {
     name: 'check_order_status',
-    description: 'Consulta el estado de la orden de trabajo del cliente (cómo va su vehículo). Úsalo cuando el cliente pregunte por el avance, estado o si ya está listo su carro.',
+    description: 'Estado de la orden de trabajo del cliente (cómo va su vehículo).',
     input_schema: {
       type: 'object',
       properties: {},
@@ -74,7 +71,7 @@ const TOOLS = [
   },
   {
     name: 'cancel_appointment',
-    description: 'Cancela la próxima cita del cliente. Úsalo solo cuando el cliente confirme que quiere cancelar. Para reagendar: primero cancela con esta función, luego usa check_availability y book_appointment.',
+    description: 'Cancela la próxima cita del cliente (solo si él lo confirma). Para reagendar: cancela y luego book_appointment.',
     input_schema: {
       type: 'object',
       properties: {},
@@ -83,7 +80,7 @@ const TOOLS = [
   },
   {
     name: 'save_client_info',
-    description: 'Guarda el nombre, correo y/o datos del vehículo del cliente en la base de datos. Llama esta función en cuanto el cliente proporcione su nombre por primera vez, y también cuando dé su correo o datos de su vehículo. Guarda todo lo que tengas antes de agendar una cita.',
+    description: 'Guarda datos que el cliente ESCRIBIÓ (nombre, correo, cédula/RUC, vehículo). No inventes nada; guarda solo lo que dijo.',
     input_schema: {
       type: 'object',
       properties: {
@@ -100,18 +97,18 @@ const TOOLS = [
   },
   {
     name: 'consultar_precio',
-    description: 'Envía una consulta al equipo del taller (Diego) y te traen la respuesta. Úsala en DOS casos: (1) cuando el cliente pregunta el precio de un servicio específico que depende del vehículo/situación (después de intentar precio_servicio); y (2) cuando el cliente pide un servicio que NO está en la lista estándar pero es razonable para un taller (enderezada y pintura, latonería, cotización, RTV/revisión técnica vehicular, sistema eléctrico, etc.). El equipo responde y tú le confirmas al cliente. NUNCA inventes precios ni digas que no se hace el servicio.',
+    description: 'Manda la consulta de precio al equipo (para servicios que dependen del vehículo, o servicios fuera de la lista base). NUNCA inventes precios ni digas que no se hace.',
     input_schema: {
       type: 'object',
       properties: {
-        pregunta: { type: 'string', description: 'La consulta completa y contextualizada, incluyendo el vehículo (marca, modelo, año) y qué necesita el cliente. Ej: "Cliente quiere enderezada y pintura de las dos puertas de un Chevrolet Corsa 2001" o "¿Cuánto cuesta el diagnóstico de un Toyota Hilux 2019 que hace ruido en el motor?"' },
+        pregunta: { type: 'string', description: 'Consulta completa: vehículo (marca, modelo, año) + qué necesita. Ej: "Enderezada y pintura de 2 puertas de un Chevrolet Corsa 2001".' },
       },
       required: ['pregunta'],
     },
   },
   {
     name: 'precio_servicio',
-    description: 'Consulta el precio estándar de un servicio básico del taller. Llámala SIEMPRE primero cuando el cliente pregunte un precio. Si devuelve un precio, díselo directamente al cliente. Si no hay precio estándar, usa consultar_precio.',
+    description: 'Precio estándar de un servicio básico. Llámala PRIMERO ante cualquier pregunta de precio. Si no hay precio, usa consultar_precio.',
     input_schema: {
       type: 'object',
       properties: {
@@ -122,7 +119,7 @@ const TOOLS = [
   },
   {
     name: 'agregar_servicio_orden',
-    description: 'Agrega un servicio adicional a la orden de trabajo ACTIVA del cliente. Úsala cuando el cliente ya tiene una orden en curso y pide un extra (ej. una lavada, revisar una llanta ponchada). NO crees una cita nueva en ese caso.',
+    description: 'Suma un servicio extra a la orden ACTIVA del cliente (si ya tiene una en curso). No crees una cita nueva.',
     input_schema: {
       type: 'object',
       properties: {
@@ -133,7 +130,7 @@ const TOOLS = [
   },
   {
     name: 'marcar_proveedor',
-    description: 'Marca a quien escribe como PROVEEDOR (no cliente) y reenvía su mensaje al equipo. Úsala cuando quien escribe es un proveedor/distribuidor del taller: va a DEJAR o ENTREGAR productos, "les traigo/traje", insumos (ej. guaipes), mercadería, factura o cobro HACIA el taller, o se presenta como proveedor de una empresa. NO registres a un proveedor como cliente ni le ofrezcas horarios.',
+    description: 'Marca a quien escribe como PROVEEDOR (viene a DEJAR productos/insumos/factura AL taller) y avisa al equipo. No lo registres como cliente.',
     input_schema: {
       type: 'object',
       properties: {
@@ -144,7 +141,7 @@ const TOOLS = [
   },
   {
     name: 'escalar_pago',
-    description: 'Escala a un humano un tema de PAGO/FACTURACIÓN del cliente. Úsala SIEMPRE que el cliente trate dinero ya movido o por resolver: pagos hechos o pendientes, saldos, deudas, facturas/facturación, retenciones, transferencias, comprobantes, reembolsos, o dice que le cobraron/pagó de más. Es información sensible: NO discutas ni confirmes montos, solo escala. NO la uses para "¿cuánto cuesta X?" (precio de un servicio) — eso es precio_servicio/consultar_precio.',
+    description: 'Escala al equipo un tema de dinero YA movido (pagos hechos/pendientes, saldos, deudas, facturas, transferencias, comprobantes, reembolsos, "me cobraron de más"). No discutas montos. NO es "¿cuánto cuesta X?".',
     input_schema: {
       type: 'object',
       properties: {
@@ -357,7 +354,7 @@ function stripMarkdown(text) {
  * @param {string} userMessage   - the new inbound text
  * @returns {string} Monterito's final reply
  */
-const MAX_REPLY_TOKENS = 500;
+const MAX_REPLY_TOKENS = 400; // respuestas de WhatsApp son cortas; menos presión de TPM
 
 /**
  * Run one full conversation turn.

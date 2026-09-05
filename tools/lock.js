@@ -9,7 +9,9 @@
  * mensajes siguientes de ese cliente.
  */
 
-const LOCK_TIMEOUT_MS = parseInt(process.env.LOCK_TIMEOUT_MS || '45000', 10);
+// 90s: da margen para 1-2 esperas de rate-limit (~25s c/u) del LLM free tier
+// antes de cortar. El cliente igual recibe respuesta, solo más lento bajo carga.
+const LOCK_TIMEOUT_MS = parseInt(process.env.LOCK_TIMEOUT_MS || '90000', 10);
 
 const _chains = new Map(); // key → Promise (cola)
 

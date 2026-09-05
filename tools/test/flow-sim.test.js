@@ -16,7 +16,7 @@ process.env.SHOP_CITY     = 'Quito';
 process.env.SHOP_SERVICES = 'Cambio de aceite, Frenos, Alineación, Diagnóstico de motor';
 
 const assert = require('assert');
-const { handleQuickReply, menuJustShown, buildMainMenu, PAYMENT_ISSUE_RE } = require('../../src/handlers/message');
+const { handleQuickReply, menuJustShown, buildMainMenu, makeFallbackReply, PAYMENT_ISSUE_RE } = require('../../src/handlers/message');
 const { checkGuards, getStaticResponse, getMediaAck, isRepeatedMessage } = require('../../src/guards');
 
 let _phoneSeq = 0;
@@ -154,6 +154,16 @@ async function test(name, fn) {
   await test('F7  "pagué de más ... quiero el reembolso" → payment handoff', async () => {
     const r = await botTurn(freshConvo(), 'pagué de más la última factura, quiero el reembolso');
     assert.strictEqual(r.via, 'payment', r.via);
+  });
+
+  // ── Fallback ante error del LLM: NO tira el menú si hay conversación ──────
+  await test('fallback  con contexto → "problema técnico, ¿me repites?" (NO menú)', () => {
+    const r = makeFallbackReply('Lunes 11 am', true);
+    assert(/problema técnico/i.test(r) && !/Puedo ayudarte con/i.test(r), r);
+  });
+  await test('fallback  sin contexto (primer contacto) → menú', () => {
+    const r = makeFallbackReply('algo raro', false);
+    assert(/1\)/.test(r), r);
   });
 
   console.log(`\n— Total: ${pass + fail} | Passed: ${pass} | Failed: ${fail} —`);

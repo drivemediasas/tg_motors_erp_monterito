@@ -32,7 +32,9 @@ const { bump } = require('../metrics');
 
 function isLLMTransientError(err) {
   const msg = String(err?.message || err || '');
-  return /quota exceeded|resource_exhausted|429|rate limits|free_tier_requests|Groq API error|fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout/i.test(msg);
+  // Cualquier fallo del LLM (rate limit, 4xx/5xx del proveedor, timeout, red) NO
+  // es un bug del bot → no dispara SAFE MODE. Se manda el fallback y se sigue.
+  return /LLM API error|LLM timeout|Groq API error|quota exceeded|resource_exhausted|invalid_argument|429|rate.?limit|free_tier_requests|fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout/i.test(msg);
 }
 
 function buildMainMenu(name = 'hola') {
@@ -68,7 +70,15 @@ function resolveContextualReply(text, clientName = 'hola') {
   return `${buildMainMenu(clientName.split(' ')[0])}\n\nPara avanzar rápido, también puedes escribir algo como: cambio de aceite el lunes a las 9am.`;
 }
 
-function makeFallbackReply(text) {
+// Respuesta cuando el turno falla (error del LLM, timeout, etc.).
+// Si YA hay conversación en curso, NO tiramos el menú de bienvenida (rompe el hilo):
+// pedimos que repita. El menú completo solo en el primer contacto o si saluda.
+function makeFallbackReply(text, hasContext = false) {
+  const norm = normalizeTextForMatch(text);
+  const isGreeting = /\b(hola|buenas|buenos dias|buenas tardes|buenas noches)\b/.test(norm);
+  if (hasContext && !isGreeting) {
+    return 'Perdón, tuve un problema técnico y no pude procesar eso ahora mismo. ¿Me repites lo último, por favor? 🙏';
+  }
   return resolveContextualReply(text, 'hola');
 }
 
@@ -418,8 +428,13 @@ async function processMessage(phone, text, sendFn, meta = {}) {
       console.error('[processMessage] error:', err.message);
       const isWatchdog = /watchdog timeout/i.test(err.message || '');
       if (isWatchdog) bump('turnTimeouts');
+      let hasContext = false;
       try {
-        await sendFn(makeFallbackReply(text));
+        const h = await getHistory(phone);
+        hasContext = (h?.historial?.length || 0) >= 2;
+      } catch { /* sin historial → menú normal */ }
+      try {
+        await sendFn(makeFallbackReply(text, hasContext));
       } catch (sendErr) {
         console.error('[processMessage] fallback send failed:', sendErr.message);
       }
@@ -443,22 +458,19 @@ async function processMessageInner(phone, text, sendFn, meta = {}) {
 
   const incomingPhone = normalizePhone(phone);
 
-  // ── Número del dueño (Diego) ────────────────────────────────────────────────
-  // El WhatsApp del taller lo atiende la administradora; Diego usa este chat para
-  // hablar con ella. El bot NO debe meterse. Solo reacciona a:
-  //   · comandos del asesor: #humano / #bot / #proveedor / #cliente
-  //   · una respuesta CITANDO la notificación 📋 de una consulta de precio (relay)
-  // Cualquier otro texto de Diego → se guarda en historial y el bot calla.
+  // ── Número del dueño (Diego) → SILENCIO ABSOLUTO ────────────────────────────
+  // El WhatsApp del taller lo atiende la administradora; Diego usa este chat solo
+  // para hablar con ella. El bot NUNCA le responde nada a Diego. Se guarda el
+  // mensaje en el historial (por contexto) y se corta. Sin comandos, sin admin.
   const ownerPhone = normalizePhone(process.env.OWNER_PHONE);
-  if (ownerPhone && incomingPhone === ownerPhone) {
-    const isCommand = !!parseAdvisorCommand(text);
-    if (isCommand || meta.quotedId) {
-      return handleAdminMessage(phone, text, sendFn, meta);
-    }
+  const extraSilent = new Set(
+    String(process.env.SILENT_PHONES || '').split(',').map(normalizePhone).filter(Boolean)
+  );
+  if ((ownerPhone && incomingPhone === ownerPhone) || extraSilent.has(incomingPhone)) {
     const h = await getHistory(phone);
     await appendMessage({ telefono: phone, paso: 'owner_chat', servicioElegido: h?.servicioElegido || null,
       newMessages: [{ role: 'user', content: text }], existingRecordId: h?.recordId || null });
-    console.log('[owner] mensaje de Diego sin comando — bot en silencio', { phone });
+    console.log('[owner] mensaje del dueño/silenciado — bot NO responde', { phone });
     return;
   }
 
@@ -627,4 +639,4 @@ async function processMessageInner(phone, text, sendFn, meta = {}) {
   });
 }
 
-module.exports = { processMessage, handleQuickReply, menuJustShown, buildMainMenu, PAYMENT_ISSUE_RE };
+module.exports = { processMessage, handleQuickReply, menuJustShown, buildMainMenu, makeFallbackReply, PAYMENT_ISSUE_RE };
