@@ -1,6 +1,6 @@
 const pool = require('./client');
 
-const MAX_HISTORY = 20;
+const MAX_HISTORY = 12;
 
 async function appendMessage({ telefono, paso, servicioElegido, newMessages, existingRecordId }) {
   // Cargar historial actual

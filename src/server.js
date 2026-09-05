@@ -1,14 +1,16 @@
 require('dotenv').config();
 
 // ── Validación de proveedor LLM al inicio ─────────────────────────────────────
-// El bot usa Groq como proveedor principal de IA.
-const GROQ_API_KEY = (process.env.GROQ_API_KEY || '').trim();
-if (!GROQ_API_KEY) {
-  console.error('[FATAL] GROQ_API_KEY no está configurada en las variables de entorno.');
-  console.error('[FATAL] Configura GROQ_API_KEY en Railway y redespliega.');
+// Proveedor LLM configurable por env (LLM_* con fallback a GROQ_*). Ver src/llm/groq.js.
+const LLM_API_KEY = (process.env.LLM_API_KEY || process.env.GROQ_API_KEY || '').trim();
+if (!LLM_API_KEY) {
+  console.error('[FATAL] Falta la API key del LLM (LLM_API_KEY o GROQ_API_KEY).');
+  console.error('[FATAL] Configúrala en Railway y redespliega.');
   process.exit(1);
 }
-console.log(`[startup] LLM provider: Groq | model: ${process.env.GROQ_MODEL || 'moonshotai/kimi-k2-instruct'} | key: ${GROQ_API_KEY.slice(0, 12)}...`);
+const { LLM_MODEL } = require('./llm/groq');
+const _llmBase = process.env.LLM_BASE_URL || process.env.GROQ_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai';
+console.log(`[startup] LLM: ${_llmBase} | model: ${LLM_MODEL} | key: ${LLM_API_KEY.slice(0, 10)}...`);
 
 const express    = require('express');
 const path       = require('path');
@@ -26,11 +28,8 @@ const { installGlobalSafeNet } = require('./safe-mode');
 const app = express();
 
 function envStatus() {
-  const required = [
-    'GROQ_API_KEY',
-    'WHATSAPP_PROVIDER',
-    'OWNER_PHONE',
-  ];
+  const required = ['WHATSAPP_PROVIDER', 'OWNER_PHONE'];
+  if (!process.env.LLM_API_KEY && !process.env.GROQ_API_KEY) required.push('LLM_API_KEY');
   const provider = (process.env.WHATSAPP_PROVIDER || '360dialog').trim();
   const missing = required.filter((name) => !String(process.env[name] || '').trim());
   return {
