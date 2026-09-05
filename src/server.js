@@ -109,22 +109,25 @@ async function ensureSchema() {
     `);
     console.log('[db] ensureSchema OK (vehiculos, consultas_precio, precios_estandar, mensajes_procesados, conversaciones+control, _migraciones)');
 
-    // Limpieza de seguridad: conversaciones dejadas por SAFE MODE técnico vuelven a BOT.
+    // Limpieza de seguridad al arrancar: libera a BOT las conversaciones que
+    // quedaron atrapadas — SAFE MODE técnico (owner SYSTEM), o HUMAN/PAUSED viejas
+    // (última actividad/cambio hace más de 48h). Un cliente nunca debe quedar sin
+    // respuesta indefinidamente por un estado obsoleto.
     try {
       const reset = await pool.query(
         `UPDATE conversaciones
-            SET owner_type = 'BOT',
-                owner_id = NULL,
-                conversation_mode = 'BOT',
-                last_owner_change = NOW(),
-                updated_at = NOW()
-          WHERE owner_type = 'HUMAN' AND owner_id = 'SYSTEM'`
+            SET owner_type = 'BOT', owner_id = NULL, conversation_mode = 'BOT',
+                last_owner_change = NOW(), updated_at = NOW()
+          WHERE owner_type <> 'BOT'
+            AND ( owner_id = 'SYSTEM'
+                  OR last_owner_change IS NULL
+                  OR last_owner_change < NOW() - INTERVAL '48 hours' )`
       );
       if (reset.rowCount) {
-        console.log(`[db] safe-mode cleanup: ${reset.rowCount} conversación(es) liberadas a BOT`);
+        console.log(`[db] cleanup arranque: ${reset.rowCount} conversación(es) obsoletas liberadas a BOT`);
       }
     } catch (e) {
-      console.error('[db] safe-mode cleanup falló (continúa el arranque):', e.message);
+      console.error('[db] cleanup arranque falló (continúa el arranque):', e.message);
     }
 
     // Migración de una sola vez: limpiar precios incrustados en nombres del catálogo.
@@ -132,8 +135,26 @@ async function ensureSchema() {
 
     // Cargar la lista de proveedores (una vez por SEED_VERSION).
     await runProveedoresSeedOnce();
+
+    // Auto-seed de la agenda: si no hay slots futuros, generarlos ahora.
+    // (El scheduler los renueva cada domingo; esto cubre el arranque inicial.)
+    await ensureAvailability();
   } catch (e) {
     console.error('[db] ensureSchema falló (continúa el arranque):', e.message);
+  }
+}
+
+async function ensureAvailability() {
+  try {
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM disponibilidad WHERE disponible = true AND fecha > CURRENT_DATE`
+    );
+    if (rows[0].n > 0) { console.log(`[availability] ${rows[0].n} slots futuros — OK`); return; }
+    const { generateAvailability } = require('../tools/db/generate-availability');
+    const r = await generateAvailability();
+    console.log(`[availability] agenda vacía → generados ${r.created} slots`);
+  } catch (e) {
+    console.error('[availability] auto-seed falló (continúa el arranque):', e.message);
   }
 }
 
