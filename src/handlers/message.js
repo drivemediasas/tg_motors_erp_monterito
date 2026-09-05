@@ -28,8 +28,7 @@ const {
   logBlock,
 } = require('../guards');
 const { getPrecioEstandar } = require('../../tools/db/precios-estandar');
-const { createAppointment } = require('../../tools/db/create-appointment');
-const { getServiceDuration } = require('../../tools/db/service-durations');
+const { bump } = require('../metrics');
 
 function isLLMTransientError(err) {
   const msg = String(err?.message || err || '');
@@ -73,36 +72,6 @@ function makeFallbackReply(text) {
   return resolveContextualReply(text, 'hola');
 }
 
-function isWeakGenericReply(reply) {
-  const norm = normalizeTextForMatch(reply);
-  return (
-    /\bte leo\b/.test(norm) ||
-    /\bcuentame que necesita tu vehiculo\b/.test(norm) ||
-    /\bque te gustaria agendar\b/.test(norm)
-  );
-}
-
-function parsePayload(body) {
-  if (body.waId || body.whatsappNumber) {
-    return { from: body.waId || body.whatsappNumber, text: body.text || body.message || '' };
-  }
-  if (body.From && body.Body) {
-    return { from: body.From.replace('whatsapp:+', ''), text: body.Body };
-  }
-  if (body.entry) {
-    const msg = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    if (msg) {
-      return {
-        from: msg.from,
-        text: msg.text?.body || '',
-        messageId: msg.id || null,
-        quotedId: msg.context?.id || null,
-      };
-    }
-  }
-  return null;
-}
-
 function normalizePhone(phone) {
   return String(phone || '').replace(/\D/g, '');
 }
@@ -112,8 +81,6 @@ function getAdminPhones() {
     process.env.ADMIN_PHONE || '',
     process.env.ADMIN_PHONE_1 || '',
     process.env.ADMIN_PHONE_2 || '',
-    '593999648041',
-    '0999648041',
   ].filter(Boolean);
   return new Set(raw.map(normalizePhone).filter(Boolean));
 }
@@ -124,164 +91,73 @@ function normalizeTextForMatch(text) {
     .toLowerCase();
 }
 
-function parseTime(text) {
-  const t = normalizeTextForMatch(text);
-  let m = t.match(/\b([01]?\d|2[0-3])[:.]([0-5]\d)\s*(am|pm)?\b/);
-  if (m) {
-    let h = parseInt(m[1], 10);
-    const min = m[2];
-    const ampm = m[3];
-    if (ampm === 'pm' && h < 12) h += 12;
-    if (ampm === 'am' && h === 12) h = 0;
-    return `${String(h).padStart(2, '0')}:${min}`;
-  }
-  m = t.match(/\b([0-9]{1,2})\s*(am|pm)\b/);
-  if (m) {
-    let h = parseInt(m[1], 10);
-    const ampm = m[2];
-    if (ampm === 'pm' && h < 12) h += 12;
-    if (ampm === 'am' && h === 12) h = 0;
-    return `${String(h).padStart(2, '0')}:00`;
-  }
-  return null;
+async function replyHorario() {
+  return getStaticResponse('horario') || `Nuestro horario de atención es: ${process.env.SHOP_HOURS || 'Lunes a Viernes 8:30-17:30, Sábados 9:00-16:00'}.`;
 }
-
-function parseRelativeDate(text) {
-  const t = normalizeTextForMatch(text);
-  const today = new Date();
-  const dayMap = {
-    domingo: 0,
-    lunes: 1,
-    martes: 2,
-    miercoles: 3,
-    jueves: 4,
-    viernes: 5,
-    sabado: 6,
-  };
-  for (const [name, dow] of Object.entries(dayMap)) {
-    if (new RegExp(`\\b${name}\\b`).test(t)) {
-      const result = new Date(today);
-      const currentDow = today.getDay();
-      let delta = dow - currentDow;
-      if (delta <= 0) delta += 7;
-      result.setDate(today.getDate() + delta);
-      return result.toISOString().slice(0, 10);
-    }
-  }
-  const iso = t.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
-  if (iso) return iso[1];
-  return null;
+async function replyDireccion() {
+  return getStaticResponse('direccion') || 'Escríbenos y te damos indicaciones para llegar a TG Motors.';
 }
-
-function inferService(text) {
-  const t = normalizeTextForMatch(text);
-  const rules = [
-    ['cambio de aceite', 'cambio de aceite'],
-    ['aceite', 'cambio de aceite'],
-    ['frenos', 'inspección de frenos'],
-    ['alineacion', 'alineación'],
-    ['diagnostico', 'diagnóstico de motor'],
-    ['motor', 'diagnóstico de motor'],
-    ['filtro', 'cambio de filtros'],
-    ['mantenimiento', 'mantenimiento general'],
-    ['lavada', 'lavada'],
-    ['lavado', 'lavada'],
-  ];
-  for (const [needle, service] of rules) {
-    if (t.includes(needle)) return service;
-  }
-  return null;
+async function replyServicios() {
+  return getStaticResponse('servicios') || 'En TG Motors ofrecemos mantenimiento, diagnóstico y reparación de vehículos.';
 }
-
-async function tryAutoBookAppointment(phone, text) {
-  const service = inferService(text);
-  const fecha = parseRelativeDate(text);
-  const hora = parseTime(text);
-  if (!service || !fecha || !hora) return null;
-
+async function replyPrecio() {
+  const price = await getPrecioEstandar('cambio de aceite');
+  if (price) {
+    return `El precio estándar de ${price.servicio} es $${parseFloat(price.precio).toFixed(2)}${price.nota ? ` (${price.nota})` : ''}.\n\n` +
+      `Si quieres, te ayudo también con horario, servicios o una cita.`;
+  }
+  return 'Para darte el precio exacto necesito revisar tu vehículo o el servicio específico.\n\n' +
+    'Envíame la marca, modelo y año, y te ayudo enseguida.';
+}
+async function replyAgendar(phone) {
   const client = await getClient(phone);
-  const nombreCliente = client?.nombre || 'Cliente';
-  const telefono = phone;
-  const slot = await pool.query(
-    `SELECT id, tecnico FROM disponibilidad
-      WHERE fecha = $1 AND TO_CHAR(hora,'HH24:MI') = $2 AND disponible = true
-      ORDER BY id LIMIT 1`,
-    [fecha, hora]
-  );
-  if (!slot.rows.length) {
-    return `No tengo libre ${fecha} a las ${hora}. Si quieres, te ayudo a buscar otro horario.`;
-  }
-
-  const cita = await createAppointment({
-    nombreCliente,
-    telefono,
-    servicio,
-    fecha,
-    hora,
-    slotRecordId: slot.rows[0].id,
-    notas: 'Agendada por WhatsApp',
-  });
-
-  try {
-    const horas = getServiceDuration(service);
-    await pool.query(
-      'UPDATE citas SET tiempo_estimado = $1, tecnico = COALESCE($2, tecnico) WHERE id = $3',
-      [horas, slot.rows[0].tecnico || null, cita.id]
-    );
-  } catch (e) {
-    console.warn('[auto-book] no se pudo guardar duración/técnico:', e.message);
-  }
-
-  return `Cita confirmada ✅\n\n` +
-    `• Servicio: ${cita.servicio}\n` +
-    `• Fecha: ${cita.fecha}\n` +
-    `• Hora: ${cita.hora}\n` +
-    `• Cliente: ${cita.nombreCliente}\n\n` +
-    `Si deseas cambiarla, me dices y te ayudo.`;
+  const name = client?.nombre?.split(' ')[0] || 'hola';
+  const hasVehicle = !!(client?.marca || client?.modelo || client?.anio || client?.placa);
+  const vehicleText = hasVehicle
+    ? `Veo que registraste un vehículo: ${[client.marca, client.modelo, client.anio].filter(Boolean).join(' ')}${client.placa ? `, placa ${client.placa}` : ''}.`
+    : 'Aún no tengo tus datos de vehículo.';
+  return `Perfecto ${name} 👌 vamos a agendar tu cita.\n\n` +
+    `${vehicleText}\n\n` +
+    `Envíame por favor:\n` +
+    `• El servicio que necesitas\n` +
+    `• La fecha que prefieres\n` +
+    `• La hora aproximada\n\n` +
+    `Si ya me dices todo junto, mejor todavía.`;
 }
 
-async function handleQuickReply(phone, text) {
+/**
+ * Fast path determinístico para preguntas muy comunes. NO agenda citas (eso es
+ * responsabilidad del LLM + book_appointment) y NO interpreta un dígito suelto
+ * como opción de menú salvo que `allowMenu` sea true (o sea: solo cuando el bot
+ * acaba de mostrar el menú numerado o es el primer contacto). Así un "2" que
+ * responde a "¿1 o 2 puertas?" no dispara la dirección del taller.
+ *
+ * @param {string} phone
+ * @param {string} text
+ * @param {{ allowMenu?: boolean }} [opts]
+ */
+async function handleQuickReply(phone, text, opts = {}) {
+  const allowMenu = opts.allowMenu !== false;
   const t = String(text || '').trim();
   const norm = normalizeTextForMatch(t);
   if (!t) return null;
 
-  const bookedReply = await tryAutoBookAppointment(phone, t);
-  if (bookedReply) {
-    return bookedReply;
+  // Selección por número — SOLO cuando corresponde (menú recién mostrado / 1er contacto).
+  // Si es un dígito suelto fuera de ese contexto, lo maneja el LLM (puede ser respuesta
+  // a una pregunta del bot), no el fast-path.
+  if (/^[1-5]$/.test(norm)) {
+    if (!allowMenu) return null;
+    if (norm === '1') return replyHorario();
+    if (norm === '2') return replyDireccion();
+    if (norm === '3') return replyServicios();
+    if (norm === '4') return replyPrecio();
+    if (norm === '5') return replyAgendar(phone);
   }
 
-  if (/^1$/.test(norm) || /\b(horario)\b/i.test(t)) {
-    return getStaticResponse('horario') || `Nuestro horario de atención es: ${process.env.SHOP_HOURS || 'Lunes a Viernes 8:30-17:30, Sábados 9:00-16:00'}.`;
-  }
-  if (/^2$/.test(norm) || /\b(direccion|ubicacion)\b/i.test(norm)) {
-    return getStaticResponse('direccion') || 'Escríbenos y te damos indicaciones para llegar a TG Motors.';
-  }
-  if (/^3$/.test(norm) || /\b(servicios?)\b/i.test(norm)) {
-    return getStaticResponse('servicios') || 'En TG Motors ofrecemos mantenimiento, diagnóstico y reparación de vehículos.';
-  }
-  if (/^4$/.test(norm) || /\b(precio|c[úu]anto|cobran|valor)\b/i.test(norm)) {
-    const price = await getPrecioEstandar('cambio de aceite');
-    if (price) {
-      return `El precio estándar de ${price.servicio} es $${parseFloat(price.precio).toFixed(2)}${price.nota ? ` (${price.nota})` : ''}.`;
-    }
-    return 'Para darte el precio exacto necesito revisar tu vehículo o el servicio específico.';
-  }
-  if (/^5$/.test(norm) || /\b(agendar|cita|reservar|turno|agenda)\b/i.test(norm)) {
-    const client = await getClient(phone);
-    const name = client?.nombre?.split(' ')[0] || 'hola';
-    const hasVehicle = !!(client?.marca || client?.modelo || client?.anio || client?.placa);
-    const vehicleText = hasVehicle
-      ? `Veo que registraste un vehículo: ${[client.marca, client.modelo, client.anio].filter(Boolean).join(' ')}${client.placa ? `, placa ${client.placa}` : ''}.`
-      : 'Aún no tengo tus datos de vehículo.';
-
-    return `Perfecto ${name} 👌 vamos a agendar tu cita.\n\n` +
-      `${vehicleText}\n\n` +
-      `Envíame por favor:\n` +
-      `• El servicio que necesitas\n` +
-      `• La fecha que prefieres\n` +
-      `• La hora aproximada\n\n` +
-      `Si ya me dices todo junto, mejor todavía.`;
-  }
+  // Coincidencias por palabra explícita — seguras en cualquier contexto
+  if (/\bhorario\b/i.test(norm)) return replyHorario();
+  if (/\b(direccion|ubicacion)\b/i.test(norm)) return replyDireccion();
+  if (/\bservicios?\b/i.test(norm)) return replyServicios();
 
   const isGreeting = /\b(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|hello|hi)\b/i.test(t);
   if (isGreeting) {
@@ -290,21 +166,25 @@ async function handleQuickReply(phone, text) {
   }
 
   const cached = getStaticResponse(t);
-  if (cached) {
-    return cached;
-  }
+  if (cached) return cached;
 
   if (/\b(precio|cu[aá]nto|c[uú]esta|cobran|cobras|valor)\b/i.test(norm)) {
-    const price = await getPrecioEstandar('cambio de aceite');
-    if (price) {
-      return `El precio estándar de ${price.servicio} es $${parseFloat(price.precio).toFixed(2)}${price.nota ? ` (${price.nota})` : ''}.\n\n` +
-        `Si quieres, te ayudo también con horario, servicios o una cita.`;
-    }
-    return 'Para darte el precio exacto necesito revisar tu vehículo o el servicio específico.\n\n' +
-      'Envíame la marca, modelo y año, y te ayudo enseguida.';
+    return replyPrecio();
   }
 
   return null;
+}
+
+/**
+ * ¿El último mensaje del bot mostró el menú numerado (o es el primer contacto)?
+ * Solo en ese caso un dígito suelto "1".."5" debe interpretarse como opción de menú.
+ */
+function menuJustShown(priorMessages) {
+  if (!Array.isArray(priorMessages) || priorMessages.length === 0) return true;
+  const lastAssistant = [...priorMessages].reverse().find(m => m.role === 'assistant');
+  if (!lastAssistant) return true;
+  const c = String(lastAssistant.content || '');
+  return /\n\s*1\)/.test(c) && /\n\s*2\)/.test(c);
 }
 
 /**
@@ -518,15 +398,17 @@ async function processMessage(phone, text, sendFn, meta = {}) {
       return await processMessageInner(phone, text, sendFn, meta);
     } catch (err) {
       console.error('[processMessage] error:', err.message);
+      const isWatchdog = /watchdog timeout/i.test(err.message || '');
+      if (isWatchdog) bump('turnTimeouts');
       try {
         await sendFn(makeFallbackReply(text));
       } catch (sendErr) {
         console.error('[processMessage] fallback send failed:', sendErr.message);
       }
-      if (!isLLMTransientError(err)) {
+      if (!isLLMTransientError(err) && !isWatchdog) {
         await enterSafeMode(phone, err, { reason: 'process_exception' });
       } else {
-        console.warn('[processMessage] LLM transient error; fallback reply sent without SAFE_MODE');
+        console.warn('[processMessage] error transitorio/watchdog; fallback enviado sin SAFE_MODE');
       }
     }
   });
@@ -554,15 +436,16 @@ async function processMessageInner(phone, text, sendFn, meta = {}) {
       last_owner_change: new Date().toISOString(),
       last_human_activity: null,
     }).catch(() => {});
-    const quickReplyText = await handleQuickReply(phone, text);
+    const adminHist = await getHistory(phone);
+    const quickReplyText = await handleQuickReply(phone, text, { allowMenu: menuJustShown(adminHist?.historial) });
     if (quickReplyText) {
+      await markBotActivity(phone, meta.messageId).catch(() => {});
       await sendFn(quickReplyText);
-      const h = await getHistory(phone);
       await appendMessage({
         telefono: phone, paso: 'activo',
-        servicioElegido: h?.servicioElegido || null,
+        servicioElegido: adminHist?.servicioElegido || null,
         newMessages: [{ role: 'user', content: text }, { role: 'assistant', content: quickReplyText }],
-        existingRecordId: h?.recordId || null,
+        existingRecordId: adminHist?.recordId || null,
       });
       return;
     }
@@ -576,16 +459,17 @@ async function processMessageInner(phone, text, sendFn, meta = {}) {
     return handleAdminMessage(phone, text, sendFn, meta);
   }
 
-  // Fast path for very common questions: avoids Gemini/tool failures entirely.
-  const quickReplyText = await handleQuickReply(phone, text);
+  // Fast path para preguntas muy comunes: evita el LLM por completo.
+  const preHist = await getHistory(phone);
+  const quickReplyText = await handleQuickReply(phone, text, { allowMenu: menuJustShown(preHist?.historial) });
   if (quickReplyText) {
+    await markBotActivity(phone, meta.messageId).catch(() => {});
     await sendFn(quickReplyText);
-    const h = await getHistory(phone);
     await appendMessage({
       telefono: phone, paso: 'activo',
-      servicioElegido: h?.servicioElegido || null,
+      servicioElegido: preHist?.servicioElegido || null,
       newMessages: [{ role: 'user', content: text }, { role: 'assistant', content: quickReplyText }],
-      existingRecordId: h?.recordId || null,
+      existingRecordId: preHist?.recordId || null,
     });
     return;
   }
@@ -723,9 +607,11 @@ async function processMessageInner(phone, text, sendFn, meta = {}) {
     return;
   }
 
-  const finalReply = isWeakGenericReply(reply)
-    ? resolveContextualReply(text, clientRecord.nombre || 'hola')
-    : reply;
+  const finalReply = reply;
+
+  // Anti-loop: marcar ANTES de enviar, para que un reintento del webhook que
+  // sortee el dedup no genere una segunda respuesta.
+  await markBotActivity(phone, meta.messageId).catch(() => {});
 
   await sendFn(finalReply);
   console.log(`[outbound] ${phone}: ${finalReply.slice(0, 80)}...`);
@@ -736,23 +622,6 @@ async function processMessageInner(phone, text, sendFn, meta = {}) {
     newMessages: [{ role: 'user', content: text }, { role: 'assistant', content: finalReply }],
     existingRecordId,
   });
-
-  // Anti-loop: registrar que ya respondimos este messageId + actividad del bot.
-  await markBotActivity(phone, meta.messageId).catch(() => {});
 }
 
-async function handleInbound(body) {
-  console.log('[webhook] raw body:', JSON.stringify(body));
-  const parsed = parsePayload(body);
-  console.log('[webhook] parsed:', JSON.stringify(parsed));
-  if (!parsed || !parsed.text) return;
-
-  await processMessage(
-    parsed.from,
-    parsed.text,
-    (msg) => sendMessage(parsed.from, msg),
-    { messageId: parsed.messageId || null, quotedId: parsed.quotedId || null }
-  );
-}
-
-module.exports = { handleInbound, processMessage };
+module.exports = { processMessage, handleQuickReply, menuJustShown };

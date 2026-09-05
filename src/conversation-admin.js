@@ -5,6 +5,8 @@ const { getPendingPriceInquiries, answerPriceInquiry } = require('../tools/db/pr
 const { sendMessage }         = require('../tools/whatsapp/send-message');
 const { stripMarkdown }        = require('./conversation');
 const { runGroqChat }         = require('./llm/groq');
+const { MAX_TOOL_ITERATIONS, SIDE_EFFECT_TOOLS, filterRepeatedSideEffects } = require('./agent-limits');
+const { bump }                 = require('./metrics');
 const pool                     = require('../tools/db/client');
 
 const ADMIN_TOOLS = [
@@ -201,10 +203,22 @@ async function runAdminTurn(history, userMessage, replyContext = null) {
 
   let totalInput  = response.usage?.input_tokens  || 0;
   let totalOutput = response.usage?.output_tokens || 0;
+  let cappedOut   = false;
 
-  while (response.stop_reason === 'tool_use') {
-    const toolResults = [];
-    for (const block of response.content.filter(b => b.type === 'tool_use')) {
+  const ranSideEffects = new Set();
+
+  for (let iter = 0; response.stop_reason === 'tool_use'; iter++) {
+    if (iter >= MAX_TOOL_ITERATIONS) {
+      cappedOut = true;
+      bump('loopCapHits');
+      console.warn('[conversation-admin] tope de iteraciones de tools alcanzado');
+      break;
+    }
+    const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
+    const { toRun, blocked } = filterRepeatedSideEffects(toolUseBlocks, ranSideEffects);
+    const toolResults = blocked.map(b => ({ type: 'tool_result', tool_use_id: b.tool_use_id, content: b.content }));
+    for (const block of toRun) {
+      if (SIDE_EFFECT_TOOLS.has(block.name)) ranSideEffects.add(block.name);
       const result = await executeAdminTool(block.name, block.input);
       toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result });
     }
@@ -220,7 +234,8 @@ async function runAdminTurn(history, userMessage, replyContext = null) {
   }
 
   const textBlock = response.content.find(b => b.type === 'text');
-  const raw = textBlock ? textBlock.text : 'No pude procesar tu consulta.';
+  const raw = textBlock ? textBlock.text
+    : (cappedOut ? 'No pude completar la consulta, la reviso y te aviso.' : 'No pude procesar tu consulta.');
   return {
     reply: stripMarkdown(raw),
     usage: { input: totalInput, output: totalOutput },

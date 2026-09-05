@@ -1,4 +1,4 @@
-const { sendMessage } = require('./send-message');
+const { notifyOwner } = require('../../src/owner-notify');
 
 /**
  * Send an emergency alert to the shop owner's personal WhatsApp number.
@@ -23,8 +23,12 @@ async function alertOwner({ clientName, clientPhone, emergencyMessage }) {
     `"${emergencyMessage}"\n\n` +
     `Responde a este número directamente por WhatsApp.`;
 
-  await sendMessage(ownerPhone, message, { ownerAlert: true });
-  console.log(`[alert-owner] Alert sent to ${ownerName} (${ownerPhone}) for client ${clientPhone}`);
+  const { sent, reason } = await notifyOwner(message, { key: clientPhone || 'global' });
+  if (sent) {
+    console.log(`[alert-owner] Alert sent to ${ownerName} (${ownerPhone}) for client ${clientPhone}`);
+  } else {
+    console.warn(`[alert-owner] Alert suppressed (${reason}) for client ${clientPhone}`);
+  }
 
   return { success: true, ownerPhone };
 }
