@@ -180,7 +180,11 @@ async function runGroqChat({ system, tools, messages, maxTokens, temperature = 0
     tools: toOpenAiTools(tools),
     tool_choice: 'auto',
     temperature,
-    max_tokens: maxTokens,
+    // Los modelos gpt-oss razonan antes de responder y esos tokens cuentan.
+    // "low" reduce el gasto sin perder calidad para un bot de atención simple.
+    // Headroom extra en max_tokens para que el razonamiento no trunque la respuesta.
+    max_tokens: Math.max(maxTokens, 700),
+    ...(/gpt-oss/i.test(MODEL) ? { reasoning_effort: 'low' } : {}),
   };
 
   try {
