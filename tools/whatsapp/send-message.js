@@ -1,21 +1,21 @@
 const axios = require('axios');
 const respondioService = require('./respondio-service');
 const d360Service = require('./360dialog-service');
+const { canSend } = require('../../src/outbound-limiter');
 
-/**
- * Send a free-form text message via the WhatsApp provider.
- * Supports 360dialog (default), WATI, Twilio and respond.io — set WHATSAPP_PROVIDER to switch.
- *
- * @param {string} to      - recipient phone number (international format, no +)
- * @param {string} message - text to send
- * @param {object} [opts]
- * @param {boolean} [opts.ownerAlert] - required true to message OWNER_PHONE (critical alerts only)
- */
 async function sendMessage(to, message, opts = {}) {
   const ownerPhone = (process.env.OWNER_PHONE || '').trim();
   if (ownerPhone && to === ownerPhone && !opts.ownerAlert) {
     console.warn('[send-message] blocked send to OWNER_PHONE — not an explicit critical alert');
     return null;
+  }
+
+  if (!opts.system) {
+    const limit = canSend(to);
+    if (!limit.allowed) {
+      console.warn('[send-message] outbound rate limit hit', { to, reason: limit.reason });
+      return null;
+    }
   }
 
   const provider = process.env.WHATSAPP_PROVIDER || '360dialog';

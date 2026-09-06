@@ -7,20 +7,16 @@
  * mandan un WhatsApp por iteración (spam al dueño / al cliente) y agotan la cuota.
  */
 
-const MAX_TOOL_ITERATIONS = 4;
+const MAX_TOOL_ITERATIONS = 2;
 
 // Herramientas con efecto colateral externo (mandan mensajes, escriben BD de forma
 // visible, cambian ownership). Solo pueden ejecutarse UNA vez por turno.
 const SIDE_EFFECT_TOOLS = new Set([
   'alert_owner',
-  'consultar_precio',
-  'escalar_pago',
-  'marcar_proveedor',
-  'responder_consulta_precio',
   'book_appointment',
   'cancel_appointment',
   'save_client_info',
-  'agregar_servicio_orden',
+  'responder_consulta_precio',
 ]);
 
 const REPEATED_TOOL_RESULT =
