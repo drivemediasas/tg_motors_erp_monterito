@@ -244,24 +244,8 @@ function getStaticResponse(text) {
   return null;
 }
 
-// ─── Media acknowledgments (non-text inbound, no LLM) ─────────────────────────
-// 360dialog/WhatsApp delivers audio, image, sticker, etc. The bot can't read
-// them, so it sends a fixed acknowledgment instead of silently ignoring them.
-
-const MEDIA_ACKS = {
-  audio:    '🎧 Recibí tu audio. En un momento lo escuchamos y te respondemos. 🙌',
-  voice:    '🎧 Recibí tu nota de voz. En un momento la escuchamos y te respondemos. 🙌',
-  image:    '📸 Recibí tu foto. Enseguida la revisamos y te respondemos. 🔧',
-  video:    '🎥 Recibí tu video. Enseguida lo revisamos y te respondemos. 🔧',
-  document: '📄 Recibí tu documento. Enseguida lo revisamos y te respondemos.',
-  sticker:  '🚗❤️',
-};
-
-const MEDIA_ACK_DEFAULT = 'Recibí tu mensaje 🙌 Para ayudarte mejor, ¿puedes escribirme tu consulta en texto?';
-
-function getMediaAck(type) {
-  return MEDIA_ACKS[type] || MEDIA_ACK_DEFAULT;
-}
+// Nota: los mensajes que no son texto (foto/audio/sticker/video/documento) el bot
+// NO los responde. Los maneja el equipo desde la app de WhatsApp. Ver 360dialog.js.
 
 // ─── Block logger ─────────────────────────────────────────────────────────────
 
@@ -382,7 +366,6 @@ function checkGuards(phone, text) {
 module.exports = {
   checkGuards,
   getStaticResponse,
-  getMediaAck,
   isRepeatedMessage,
   trimHistory,
   recordTokenUsage,

@@ -4,9 +4,35 @@ const { sendMessage }  = require('../../tools/whatsapp/send-message');
 const { sendTemplate } = require('../../tools/whatsapp/send-template');
 const { getHistory }   = require('../../tools/db/get-history');
 const { appendMessage } = require('../../tools/db/append-message');
+const { getConversationState } = require('../../tools/db/conversation-state');
+const { getClient } = require('../../tools/db/get-client');
 
 const shopName = process.env.SHOP_NAME || 'TG Motors';
 const googleReviewUrl = process.env.GOOGLE_REVIEW_URL || '';
+
+const _digits = (p) => String(p || '').replace(/\D/g, '');
+const _BUSY_MODES = new Set(['PAUSED', 'HUMAN', 'WAITING_HUMAN', 'WAITING_PRICE', 'CLOSED']);
+
+/**
+ * ¿Está bien mandarle un mensaje proactivo (recordatorio/encuesta) a este número?
+ * NO si: es Diego, es un proveedor, o un humano está atendiendo esa conversación.
+ */
+async function canMessageProactively(telefono) {
+  if (_digits(process.env.OWNER_PHONE) && _digits(telefono) === _digits(process.env.OWNER_PHONE)) {
+    return { ok: false, why: 'owner_phone' };
+  }
+  try {
+    const st = await getConversationState(telefono);
+    if (st.owner_type !== 'BOT' || _BUSY_MODES.has(st.conversation_mode)) {
+      return { ok: false, why: `estado ${st.owner_type}/${st.conversation_mode}` };
+    }
+  } catch (e) { /* si no hay estado, asumimos BOT */ }
+  try {
+    const c = await getClient(telefono);
+    if (c && c.es_proveedor) return { ok: false, why: 'proveedor' };
+  } catch (e) { /* ignore */ }
+  return { ok: true };
+}
 
 /**
  * Job 1: Send appointment reminders ~2h before the appointment time.
@@ -19,6 +45,8 @@ async function sendReminders() {
 
   for (const apt of appointments) {
     try {
+      const gate = await canMessageProactively(apt.telefono);
+      if (!gate.ok) { console.log(`[reminders] skip ${apt.telefono} (${gate.why})`); continue; }
       // Use a template if configured, else fall back to free text
       const useTemplate = process.env.REMINDER_TEMPLATE_NAME;
 
@@ -53,6 +81,8 @@ async function sendSurveys() {
 
   for (const apt of appointments) {
     try {
+      const gate = await canMessageProactively(apt.telefono);
+      if (!gate.ok) { console.log(`[surveys] skip ${apt.telefono} (${gate.why})`); continue; }
       const msg = `Hola ${apt.nombreCliente} 😊 Gracias por confiar en ${shopName}.\n\n¿Cómo calificarías tu experiencia de hoy?\n\n⭐ 1 - Malo\n⭐⭐ 2 - Regular\n⭐⭐⭐ 3 - Bueno\n⭐⭐⭐⭐ 4 - Muy bueno\n⭐⭐⭐⭐⭐ 5 - Excelente\n\nResponde con el número de estrellas.`;
       await sendMessage(apt.telefono, msg);
       await updateAppointment(apt.id, { Seguimiento: 'survey_sent' });
@@ -82,6 +112,8 @@ async function sendMaintenanceReminders() {
 
   for (const c of clients) {
     try {
+      const gate = await canMessageProactively(c.telefono);
+      if (!gate.ok) { console.log(`[maintenance] skip ${c.telefono} (${gate.why})`); continue; }
       const vehicle = [c.marca, c.modelo].filter(Boolean).join(' ');
       const msg = `Hola ${c.nombre} 🚗 Han pasado aproximadamente 4 meses desde tu último servicio${vehicle ? ` de tu ${vehicle}` : ''}.\n\nEn ${shopName} te recomendamos una revisión preventiva para mantener tu vehículo en óptimas condiciones.\n\n¿Te gustaría agendar una cita? Escríbenos y te ayudamos 😊`;
       await sendMessage(c.telefono, msg);
@@ -106,4 +138,4 @@ async function sendReviewRequest(telefono, nombre) {
   await sendMessage(telefono, msg);
 }
 
-module.exports = { sendReminders, sendSurveys, sendMaintenanceReminders, sendReviewRequest };
+module.exports = { sendReminders, sendSurveys, sendMaintenanceReminders, sendReviewRequest, canMessageProactively };

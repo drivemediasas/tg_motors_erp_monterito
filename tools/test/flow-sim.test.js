@@ -17,7 +17,8 @@ process.env.SHOP_SERVICES = 'Cambio de aceite, Frenos, Alineación, Diagnóstico
 
 const assert = require('assert');
 const { handleQuickReply, menuJustShown, buildMainMenu, makeFallbackReply, PAYMENT_ISSUE_RE } = require('../../src/handlers/message');
-const { checkGuards, getStaticResponse, getMediaAck, isRepeatedMessage } = require('../../src/guards');
+const { checkGuards, getStaticResponse, isRepeatedMessage } = require('../../src/guards');
+const { parseD360Payload } = require('../../src/handlers/360dialog');
 
 let _phoneSeq = 0;
 function freshConvo(seed = []) {
@@ -140,8 +141,14 @@ async function test(name, fn) {
     const r = await botTurn(cc, 'cotización rara de algo raro');
     assert.strictEqual(r.via, 'repeated', r.via);
   });
-  await test('F3  audio/imagen → acuse fijo sin LLM', () => {
-    assert(/audio/i.test(getMediaAck('audio')) && /foto/i.test(getMediaAck('image')));
+  await test('F3  foto/audio → el bot NO responde nada (type != text)', () => {
+    const p = parseD360Payload({ entry: [{ changes: [{ value: {
+      metadata: { display_phone_number: '593999999999' },
+      contacts: [{ wa_id: '593900000001', profile: { name: 'X' } }],
+      messages: [{ from: '593900000001', id: 'wamid.IMG1', type: 'image', image: { id: 'm1' } }],
+    } }] }] });
+    assert.strictEqual(p.type, 'image');
+    assert.strictEqual(p.text, null); // no hay texto → handleD360Inbound corta sin enviar
   });
   await test('F4  "ecuación de física" → bloqueo off-topic', async () => {
     const r = await botTurn(freshConvo(), '¿me ayudas con una ecuación de física?');

@@ -1,67 +1,19 @@
-const axios = require('axios');
-const respondioService = require('./respondio-service');
 const d360Service = require('./360dialog-service');
 
 /**
- * Send a free-form text message via the WhatsApp provider.
- * Supports 360dialog (default), WATI, Twilio and respond.io — set WHATSAPP_PROVIDER to switch.
+ * Envía un mensaje de texto por WhatsApp. Proveedor: 360dialog (el único activo).
+ * NUNCA le envía nada a Diego (OWNER_PHONE) — última línea de defensa.
  *
- * @param {string} to      - recipient phone number (international format, no +)
- * @param {string} message - text to send
- * @param {object} [opts]
- * @param {boolean} [opts.ownerAlert] - required true to message OWNER_PHONE (critical alerts only)
+ * @param {string} to      - teléfono destino (internacional, sin +)
+ * @param {string} message - texto
  */
-async function sendMessage(to, message, opts = {}) {
-  const ownerPhone = (process.env.OWNER_PHONE || '').trim();
-  if (ownerPhone && to === ownerPhone && !opts.ownerAlert) {
-    console.warn('[send-message] blocked send to OWNER_PHONE — not an explicit critical alert');
+async function sendMessage(to, message) {
+  const owner = (process.env.OWNER_PHONE || '').replace(/\D/g, '');
+  if (owner && String(to || '').replace(/\D/g, '') === owner) {
+    console.warn('[send-message] BLOQUEADO envío a OWNER_PHONE — Diego no recibe nada del bot');
     return null;
   }
-
-  const provider = process.env.WHATSAPP_PROVIDER || '360dialog';
-
-  if (provider === 'wati') {
-    return sendWati(to, message);
-  } else if (provider === 'twilio') {
-    return sendTwilio(to, message);
-  } else if (provider === 'respondio') {
-    return sendRespondio(to, message);
-  } else if (provider === '360dialog') {
-    return d360Service.sendMessage(to, message);
-  }
-
-  throw new Error(`Unknown WHATSAPP_PROVIDER: ${provider}`);
-}
-
-async function sendWati(to, message) {
-  const url = `${process.env.WHATSAPP_API_URL}/api/v1/sendSessionMessage/${to}`;
-  const response = await axios.post(
-    url,
-    { messageText: message },
-    { headers: { Authorization: process.env.WHATSAPP_API_KEY } }
-  );
-  return response.data;
-}
-
-async function sendTwilio(to, message) {
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken  = process.env.TWILIO_AUTH_TOKEN;
-  const from       = process.env.WHATSAPP_PHONE_NUMBER_ID;
-
-  const response = await axios.post(
-    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
-    new URLSearchParams({
-      From: `whatsapp:+${from}`,
-      To:   `whatsapp:+${to}`,
-      Body: message,
-    }),
-    { auth: { username: accountSid, password: authToken } }
-  );
-  return response.data;
-}
-
-async function sendRespondio(to, message) {
-  return respondioService.sendMessage(`+${to}`, message);
+  return d360Service.sendMessage(to, message);
 }
 
 module.exports = { sendMessage };

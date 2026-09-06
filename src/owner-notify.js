@@ -1,14 +1,14 @@
-const { sendMessage } = require('../tools/whatsapp/send-message');
+const d360Service = require('../tools/whatsapp/360dialog-service');
 const { bump } = require('./metrics');
 
 /**
- * Canal ÚNICO para mandarle WhatsApp al dueño del taller.
- * Rate-limit + dedup en memoria para que un loop de tools o repeticiones del
- * cliente no generen una ráfaga de mensajes al número personal del dueño
- * (eso además degrada el quality rating del número en Meta).
- *
- *   - misma `key` dentro de OWNER_NOTIFY_COOLDOWN_MS      → se suprime
- *   - texto idéntico dentro de OWNER_NOTIFY_DEDUP_MS      → se suprime
+ * Canal ÚNICO para avisar al EQUIPO (la administradora) por WhatsApp de un evento
+ * urgente de un cliente (emergencia/wincha). NUNCA le escribe a Diego (OWNER_PHONE).
+ * Manda a ALERT_PHONE si está configurada; si no, solo loguea (la administradora ve
+ * el mensaje del cliente igual, porque ella atiende el número del taller).
+ * Rate-limit + dedup para que un loop de tools no genere una ráfaga.
+ *   - misma `key` dentro de OWNER_NOTIFY_COOLDOWN_MS  → se suprime
+ *   - texto idéntico dentro de OWNER_NOTIFY_DEDUP_MS  → se suprime
  */
 
 const COOLDOWN_MS = parseInt(process.env.OWNER_NOTIFY_COOLDOWN_MS || '600000', 10); // 10 min
@@ -48,11 +48,7 @@ function _resetForTest() { _lastByKey.clear(); _lastByText.clear(); }
  * @returns {Promise<{ sent: boolean, reason?: string }>}
  */
 async function notifyOwner(text, { key = 'global' } = {}) {
-  const ownerPhone = (process.env.OWNER_PHONE || '').trim();
-  if (!ownerPhone) {
-    console.warn('[owner-notify] OWNER_PHONE no configurado — se omite');
-    return { sent: false, reason: 'no_owner_phone' };
-  }
+  const alertPhone = (process.env.ALERT_PHONE || '').replace(/\D/g, '');
 
   const { suppress, reason } = registerAndCheck(key, text);
   if (suppress) {
@@ -61,9 +57,14 @@ async function notifyOwner(text, { key = 'global' } = {}) {
     return { sent: false, reason };
   }
 
-  await sendMessage(ownerPhone, text, { ownerAlert: true });
+  if (!alertPhone) {
+    console.warn('[owner-notify] ALERT_PHONE no configurada — solo log:', text.replace(/\n/g, ' ').slice(0, 120));
+    return { sent: false, reason: 'no_alert_phone' };
+  }
+
+  await d360Service.sendMessage(alertPhone, text);
   bump('ownerNotifications');
-  console.log('[owner-notify] enviado al dueño', { key });
+  console.log('[owner-notify] aviso enviado a ALERT_PHONE', { key });
   return { sent: true };
 }
 

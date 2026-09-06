@@ -16,7 +16,6 @@ const express    = require('express');
 const path       = require('path');
 const helmet     = require('helmet');
 const rateLimit  = require('express-rate-limit');
-const { handleRespondioInbound } = require('./handlers/respondio');
 const { handleD360Inbound } = require('./handlers/360dialog');
 const scheduler  = require('./scheduler');
 const apiRouter  = require('./routes/api');
@@ -231,33 +230,20 @@ app.get('/webhook', (req, res) => {
   res.sendStatus(403);
 });
 
-// Se responde 200 ANTES de procesar para que WhatsApp no reintente (y no duplique).
-// Comparte el handler deduplicado de 360dialog (mismo shape Meta Cloud API).
-app.post('/webhook', async (req, res) => {
-  res.status(200).end();
-  try { await handleD360Inbound(req.body); }
-  catch (err) { console.error('[webhook] error:', err.message); }
-});
-
-// ── Webhook (respond.io) — proveedor nuevo, en paralelo, no toca el de arriba ───
-app.post('/webhook/respondio', async (req, res) => {
-  if (process.env.RESPOND_IO_WEBHOOK_SECRET && req.query.secret !== process.env.RESPOND_IO_WEBHOOK_SECRET) {
-    return res.sendStatus(403);
-  }
-  res.status(200).end();
-  try { await handleRespondioInbound(req.body); }
-  catch (err) { console.error('[webhook/respondio] error:', err.message); }
-});
-
-// ── Webhook (360dialog) — proveedor nuevo, en paralelo, no toca los de arriba ───
-app.post('/webhook/360dialog', async (req, res) => {
+// ── Webhook (360dialog) — el ÚNICO webhook de entrada activo ────────────────────
+// Se responde 200 ANTES de procesar para que WhatsApp no reintente (ni duplique).
+// Acepta también /webhook (mismo secreto) por si el panel de 360dialog quedó
+// apuntado ahí; ambas rutas exigen D360_WEBHOOK_SECRET si está configurado.
+async function d360Webhook(req, res) {
   if (process.env.D360_WEBHOOK_SECRET && req.query.secret !== process.env.D360_WEBHOOK_SECRET) {
     return res.sendStatus(403);
   }
   res.status(200).end();
   try { await handleD360Inbound(req.body); }
   catch (err) { console.error('[webhook/360dialog] error:', err.message); }
-});
+}
+app.post('/webhook/360dialog', d360Webhook);
+app.post('/webhook', d360Webhook);
 
 // ── Blueprints (SVG vehicle diagrams) ──────────────────────────────────────────
 app.use('/blueprint_autos', express.static(path.join(__dirname, '..', 'public', 'blueprint_autos'), {

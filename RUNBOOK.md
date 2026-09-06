@@ -21,22 +21,26 @@ npm test                       # corre las 5 suites (control, isolation, agent-l
 Nota: el directorio del proyecto termina en espacio: `Workflow TG Motors ` (usar comillas).
 
 ## Variables de entorno
-Críticas: `DATABASE_URL`, `LLM_API_KEY`, `WHATSAPP_PROVIDER=360dialog`, `D360_API_KEY`, `D360_WEBHOOK_SECRET`, `OWNER_PHONE` (número de Diego: `593987189276`), `DASHBOARD_EMAIL`, `DASHBOARD_PASSWORD`.
+Críticas: `DATABASE_URL`, `LLM_API_KEY`, `WHATSAPP_PROVIDER=360dialog`, `D360_API_KEY`, `D360_WEBHOOK_SECRET`, `OWNER_PHONE` (Diego `593987189276` — el bot NUNCA le escribe), `ALERT_PHONE` (administradora — recibe avisos de emergencia), `DASHBOARD_EMAIL`, `DASHBOARD_PASSWORD`.
 LLM (default = Groq free): `LLM_API_KEY` (https://console.groq.com), `LLM_BASE_URL=https://api.groq.com/openai/v1`, `LLM_MODEL=openai/gpt-oss-20b`, `LLM_FALLBACK_MODEL=openai/gpt-oss-120b`. Free = ~30 req/min, 8k tokens/min. Si se satura con varios clientes: pay-as-you-go en Groq, o Cerebras (`LLM_BASE_URL=https://api.cerebras.ai/v1`, `LLM_MODEL=gpt-oss-120b`, con billing activo). **NO usar Gemini con herramientas** (2.5/3.x exigen thought_signature → 400). Nombres viejos `GROQ_*` siguen funcionando.
 Config taller: `SHOP_NAME/CITY/ADDRESS/HOURS/SERVICES`, `SHOP_TECHNICIANS`, `SHOP_CAPACITY`, `GOOGLE_REVIEW_URL`, `OWNER_NAME`.
 Resiliencia (default): `HUMAN_TIMEOUT_MIN=20`, `LOCK_TIMEOUT_MS=90000`, `OWNER_NOTIFY_COOLDOWN_MS=600000`, `DB_POOL_MAX=10`, `BATCH_MS=1200`, `COEXISTENCE_ECHO_DETECT=on`, `REMINDER_TEMPLATE_NAME`.
 
-## Quién habla con quién
-- El bot **solo** conversa con **clientes** del taller.
-- **`OWNER_PHONE` (Diego)**: el bot lo IGNORA. Diego usa ese chat para hablar con la administradora
-  (su hermana). El bot solo reacciona a comandos: `#humano <tel>`, `#bot <tel>`, `#proveedor <tel>`,
-  `#cliente <tel>` — o a una respuesta CITANDO la notificación 📋 de una consulta de precio.
-- **La administradora** atiende el número desde la app de WhatsApp. Para que el bot calle mientras
-  ella responde a un cliente: hoy, `#humano <tel del cliente>` desde el chat de Diego. La detección
-  automática (`COEXISTENCE_ECHO_DETECT=on`) está **apagada** hasta verificar el payload real —
-  ver "Activar detección de respuesta humana" abajo.
-- **No hay número de QA con permisos especiales**: para probar, se usa cualquier número que NO sea
-  `OWNER_PHONE` y se comporta 100% como cliente.
+## Quién habla con quién (modelo de operación)
+- El bot **solo** conversa con **clientes** del taller. Nada de ERP ni consultas internas.
+- **`OWNER_PHONE` (Diego): el bot NUNCA le escribe NADA.** Ni respuestas, ni acuses, ni alertas.
+  Sus mensajes entrantes se ignoran. `OWNER_PHONE` está en lista negra de salida a nivel del
+  cable (`360dialog-service.js`) — ninguna ruta, presente o futura, puede mandarle un mensaje.
+  No hay flujo de dueño ni comandos `#`.
+- **La administradora atiende el número desde la app de WhatsApp.** Cuando ella responde a un
+  cliente, `COEXISTENCE_ECHO_DETECT=on` lo detecta y el bot calla 20 min para ese cliente
+  (`HUMAN_TIMEOUT_MIN`). El bot distingue su propio eco con `wasSentByBot()`.
+- **Mensajes que no son texto** (foto/audio/sticker/video/documento): el bot **no responde nada**.
+  Los ve y atiende la administradora.
+- **Avisos de emergencia** (cliente pide grúa/wincha) → van a **`ALERT_PHONE`** (número de la
+  administradora). Si `ALERT_PHONE` está vacío, solo se loguean.
+- **No hay número de QA con permisos especiales**: para probar, cualquier número que NO sea
+  `OWNER_PHONE` se comporta 100% como cliente.
 
 ## Activar detección de respuesta humana (coexistence)
 1. Con `COEXISTENCE_ECHO_DETECT=on` (default), pedir a alguien que responda a un cliente desde la

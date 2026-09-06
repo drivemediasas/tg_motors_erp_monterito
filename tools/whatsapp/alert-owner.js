@@ -1,36 +1,28 @@
 const { notifyOwner } = require('../../src/owner-notify');
 
 /**
- * Send an emergency alert to the shop owner's personal WhatsApp number.
+ * Avisa al EQUIPO (la administradora, vía ALERT_PHONE) de una emergencia de un
+ * cliente (wincha/grúa/varado). NUNCA le escribe a Diego. Si ALERT_PHONE no está
+ * configurada, solo se loguea (la administradora ve el mensaje del cliente igual).
  *
  * @param {object} params
- * @param {string} params.clientName       - Customer name
- * @param {string} params.clientPhone      - Customer phone number
- * @param {string} params.emergencyMessage - Original message from customer
- * @returns {object} { success, ownerPhone }
+ * @param {string} params.clientName       - nombre del cliente
+ * @param {string} params.clientPhone      - teléfono del cliente
+ * @param {string} params.emergencyMessage - mensaje original del cliente
+ * @returns {object} { success }
  */
 async function alertOwner({ clientName, clientPhone, emergencyMessage }) {
-  const ownerPhone = (process.env.OWNER_PHONE || '').trim();
-  const ownerName  = (process.env.OWNER_NAME  || 'Equipo').trim();
-
-  if (!ownerPhone) {
-    console.warn('[alert-owner] OWNER_PHONE not configured — skipping alert');
-    return { success: false, ownerPhone: null };
-  }
-
   const message =
-    `🚨 EMERGENCIA — ${clientName} (+${clientPhone})\n\n` +
+    `🚨 EMERGENCIA — ${clientName || 'Cliente'} (+${clientPhone})\n\n` +
     `"${emergencyMessage}"\n\n` +
-    `Responde a este número directamente por WhatsApp.`;
+    `Escríbele directo por WhatsApp.`;
 
   const { sent, reason } = await notifyOwner(message, { key: clientPhone || 'global' });
-  if (sent) {
-    console.log(`[alert-owner] Alert sent to ${ownerName} (${ownerPhone}) for client ${clientPhone}`);
-  } else {
-    console.warn(`[alert-owner] Alert suppressed (${reason}) for client ${clientPhone}`);
-  }
+  console.log(sent
+    ? `[alert-owner] aviso enviado para cliente ${clientPhone}`
+    : `[alert-owner] aviso NO enviado (${reason}) para cliente ${clientPhone}`);
 
-  return { success: true, ownerPhone };
+  return { success: true };
 }
 
 module.exports = { alertOwner };

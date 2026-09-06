@@ -5,6 +5,15 @@ const TIMEOUT_MS = 10000;
 const RETRY_DELAY_MS = 800;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const _digits = (p) => String(p || '').replace(/\D/g, '');
+
+// Última línea de defensa: el chat de TG Motors NUNCA le escribe a Diego (OWNER_PHONE),
+// pase lo que pase en las capas de arriba. Aunque alguna ruta futura se olvide del
+// control layer, jamás le llega un mensaje.
+function isBlockedRecipient(phone) {
+  const owner = _digits(process.env.OWNER_PHONE);
+  return owner && _digits(phone) === owner;
+}
 
 // IDs de mensajes que ENVIÓ el bot (por la API). En modo coexistence, 360dialog
 // reenvía al webhook también los mensajes salientes; esto permite distinguir
@@ -36,6 +45,10 @@ function isRetriableSendError(err) {
  * @param {string} text  - message text
  */
 async function sendMessage(phone, text, _attempt = 1) {
+  if (isBlockedRecipient(phone)) {
+    console.warn('[360dialog] BLOQUEADO envío a OWNER_PHONE (Diego no recibe nada del bot)');
+    return null;
+  }
   const baseUrl = process.env.D360_API_BASE_URL || 'https://waba-v2.360dialog.io';
   const apiKey  = process.env.D360_API_KEY;
 
@@ -87,6 +100,10 @@ async function sendMessage(phone, text, _attempt = 1) {
  * @param {Array}  params       - array of string values for the body placeholders
  */
 async function sendTemplate(phone, templateName, params = []) {
+  if (isBlockedRecipient(phone)) {
+    console.warn('[360dialog] BLOQUEADO template a OWNER_PHONE');
+    return null;
+  }
   const baseUrl  = process.env.D360_API_BASE_URL || 'https://waba-v2.360dialog.io';
   const apiKey   = process.env.D360_API_KEY;
   const langCode = process.env.D360_TEMPLATE_LANG || 'es';
@@ -128,4 +145,4 @@ async function sendTemplate(phone, templateName, params = []) {
   }
 }
 
-module.exports = { sendMessage, sendTemplate, wasSentByBot };
+module.exports = { sendMessage, sendTemplate, wasSentByBot, isBlockedRecipient };

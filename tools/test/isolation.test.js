@@ -8,7 +8,6 @@ process.env.SHOP_NAME = process.env.SHOP_NAME || 'TG Motors';
 process.env.SHOP_SERVICES = process.env.SHOP_SERVICES || 'Cambio de aceite, Frenos, Alineación';
 
 const assert = require('assert');
-const { decideRelayTarget } = require('../../src/relay-router');
 const { withLock } = require('../../tools/lock');
 const { markProcessedDurable, fallbackId } = require('../../tools/db/messages-processed');
 const { buildSystemPrompt } = require('../../prompts/monterito');
@@ -44,30 +43,6 @@ function fakeStore() {
     assert(C.includes('Sail') && !C.includes('Corsa') && !C.includes('Hilux'), 'C contiene datos de otro');
     assert(!A.includes('BBB222') && !A.includes('CCC333'), 'A filtró placa ajena');
     assert(!B.includes('AAA111') && !B.includes('593900000003'), 'B filtró datos ajenos');
-  });
-
-  // ── Test 2: Relay determinístico (Diego cita la consulta B) ─────────────────
-  await test('Relay determinístico — cita B → envía a B, A sigue pendiente', () => {
-    const A = { id: 1, telefono: '593900000001', nombre: 'Ana' };
-    const B = { id: 2, telefono: '593900000002', nombre: 'Bruno' };
-    const d = decideRelayTarget({ quotedInquiry: B, pendingInquiries: [A, B] });
-    assert.strictEqual(d.action, 'send');
-    assert.strictEqual(d.inquiry.id, 2);
-    assert.strictEqual(d.routedBy, 'quoted_message_id');
-  });
-
-  // ── Test 3: Relay ambiguo (2 pendientes, sin cita) → NO envía ───────────────
-  await test('Relay ambiguo — 2 pendientes sin cita → reject_ambiguous (no envía)', () => {
-    const d = decideRelayTarget({ quotedInquiry: null, pendingInquiries: [{ id: 1 }, { id: 2 }] });
-    assert.strictEqual(d.action, 'reject_ambiguous');
-  });
-
-  // ── Test 4: Relay con 1 sola pendiente (sin cita) → permite ─────────────────
-  await test('Relay 1 pendiente sin cita → send a esa', () => {
-    const d = decideRelayTarget({ quotedInquiry: null, pendingInquiries: [{ id: 7, telefono: '593900000007' }] });
-    assert.strictEqual(d.action, 'send');
-    assert.strictEqual(d.inquiry.id, 7);
-    assert.strictEqual(d.routedBy, 'single_pending');
   });
 
   // ── Test 5: Dedup — mismo message_id entra 3 veces → 1 sola vez ─────────────

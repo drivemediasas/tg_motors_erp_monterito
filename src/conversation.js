@@ -214,15 +214,12 @@ async function executeTool(name, input, context = {}) {
 
   if (name === 'alert_owner') {
     // El teléfono SIEMPRE sale del contexto (el chat real), nunca de lo que arme el LLM.
-    const result = await alertOwner({
+    await alertOwner({
       clientName:       input.clientName || context.nombre,
       clientPhone:      context.telefono,
       emergencyMessage: input.emergencyMessage,
     });
-    if (!result.success) {
-      return 'Alerta enviada internamente. El equipo contactará al cliente pronto.';
-    }
-    return `Alerta enviada al dueño del taller (${result.ownerPhone}). Ya está notificado.`;
+    return 'El equipo ya quedó avisado de la emergencia. Dile al cliente que lo contactan de inmediato.';
   }
 
   if (name === 'check_order_status') {

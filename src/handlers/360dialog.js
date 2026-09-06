@@ -1,6 +1,5 @@
 const { processMessage } = require('./message');
 const d360Service = require('../../tools/whatsapp/360dialog-service');
-const { getMediaAck } = require('../guards');
 const pool = require('../../tools/db/client');
 const { markProcessedDurable, fallbackId } = require('../../tools/db/messages-processed');
 const { takeOverByHuman } = require('../../tools/db/conversation-state');
@@ -65,6 +64,7 @@ function parseD360Payload(body) {
     return {
       agentOutbound: true,
       messageId,
+      ownNumber,
       customer: customer || null,
       textSnippet: (msg.text?.body || '').slice(0, 40),
     };
@@ -107,15 +107,17 @@ async function handleD360Inbound(body) {
       return;
     }
     // Lo mandó un humano (la administradora) desde la app → callar al bot para ese cliente.
-    if (parsed.customer) {
+    const cust = parsed.customer;
+    const validCustomer = cust && /^\d{8,15}$/.test(cust) && cust !== parsed.ownNumber;
+    if (validCustomer) {
       try {
-        await takeOverByHuman(parsed.customer, 'admin', 'HUMAN');
-        console.log('[360dialog] respuesta humana detectada → bot en silencio', { customer: parsed.customer });
+        await takeOverByHuman(cust, 'admin', 'HUMAN');
+        console.log('[360dialog] respuesta humana detectada → bot en silencio 20min', { customer: cust });
       } catch (e) {
         console.error('[360dialog] no se pudo pasar a HUMAN:', e.message);
       }
     } else {
-      console.warn('[360dialog] respuesta humana detectada pero sin número de cliente en el payload', { snippet: parsed.textSnippet });
+      console.warn('[360dialog] saliente del taller sin destinatario claro — no se toca nada', { snippet: parsed.textSnippet });
     }
     return;
   }
@@ -139,14 +141,10 @@ async function handleD360Inbound(body) {
     console.error('[360dialog] dedup durable error (continúa):', e.message);
   }
 
-  // Non-text messages (audio, image, sticker...) → fixed acknowledgment, no LLM
+  // Mensajes que no son texto (foto/audio/sticker/video/documento): el bot NO
+  // responde nada. Los ve y atiende el equipo desde la app de WhatsApp.
   if (type !== 'text') {
-    console.log('[360dialog] media ack', { type, phone, messageId });
-    try {
-      await d360Service.sendMessage(phone, getMediaAck(type));
-    } catch (err) {
-      console.error('[360dialog] media ack error:', err.message);
-    }
+    console.log('[360dialog] media ignorada (no-texto, el equipo la atiende)', { type, phone });
     return;
   }
 
