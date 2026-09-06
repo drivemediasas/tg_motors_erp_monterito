@@ -32,7 +32,7 @@ async function sendReminders() {
         ]);
       } else {
         const msg = `Hola ${apt.nombreCliente} 👋 Te recordamos tu cita de hoy en ${shopName}:\n\n🔧 Servicio: ${apt.servicio}\n🕐 Hora: ${apt.hora}\n\n¡Te esperamos!`;
-        await sendMessage(apt.telefono, msg);
+        await sendMessage(apt.telefono, msg, { system: true });
       }
 
       await updateAppointment(apt.id, { Seguimiento: 'reminder_sent' });
@@ -54,7 +54,7 @@ async function sendSurveys() {
   for (const apt of appointments) {
     try {
       const msg = `Hola ${apt.nombreCliente} 😊 Gracias por confiar en ${shopName}.\n\n¿Cómo calificarías tu experiencia de hoy?\n\n⭐ 1 - Malo\n⭐⭐ 2 - Regular\n⭐⭐⭐ 3 - Bueno\n⭐⭐⭐⭐ 4 - Muy bueno\n⭐⭐⭐⭐⭐ 5 - Excelente\n\nResponde con el número de estrellas.`;
-      await sendMessage(apt.telefono, msg);
+      await sendMessage(apt.telefono, msg, { system: true });
       await updateAppointment(apt.id, { Seguimiento: 'survey_sent' });
       // Guardar la pregunta en el historial (usando el recordId existente para NO
       // pisar el historial) → si el cliente responde texto libre, el LLM tiene contexto.
@@ -84,7 +84,7 @@ async function sendMaintenanceReminders() {
     try {
       const vehicle = [c.marca, c.modelo].filter(Boolean).join(' ');
       const msg = `Hola ${c.nombre} 🚗 Han pasado aproximadamente 4 meses desde tu último servicio${vehicle ? ` de tu ${vehicle}` : ''}.\n\nEn ${shopName} te recomendamos una revisión preventiva para mantener tu vehículo en óptimas condiciones.\n\n¿Te gustaría agendar una cita? Escríbenos y te ayudamos 😊`;
-      await sendMessage(c.telefono, msg);
+      await sendMessage(c.telefono, msg, { system: true });
       await markMaintenanceReminded(c.id);
       console.log(`[maintenance] Sent to ${c.telefono}`);
     } catch (err) {
@@ -103,7 +103,7 @@ async function sendReviewRequest(telefono, nombre) {
     return;
   }
   const msg = `¡Qué alegría saber que tuviste una buena experiencia, ${nombre}! 🙌\n\nSi tienes un momento, nos ayudaría mucho que dejes una reseña en Google. Solo toma 1 minuto:\n${googleReviewUrl}\n\n¡Gracias de corazón! 🙏`;
-  await sendMessage(telefono, msg);
+  await sendMessage(telefono, msg, { system: true });
 }
 
 module.exports = { sendReminders, sendSurveys, sendMaintenanceReminders, sendReviewRequest };

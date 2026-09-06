@@ -177,9 +177,7 @@ async function handleQuickReply(phone, text, opts = {}) {
   const cached = getStaticResponse(t);
   if (cached) return cached;
 
-  // Las preguntas de precio en texto libre ("¿cuánto cuesta X?") van al LLM:
-  // así usa precio_servicio (precio estándar) o consultar_precio (escala al equipo)
-  // según el caso. El fast-path solo resuelve el "4" del menú.
+  // Preguntas de precio van al LLM (precio_servicio). El fast-path solo resuelve el "4" del menú.
   return null;
 }
 
@@ -271,15 +269,9 @@ async function handleSurveyReply(phone, text) {
   return true;
 }
 
-// Mensaje ÚNICO y fijo para el handoff de pagos (capa 1 regex y capa 2 LLM usan el mismo).
-// Sin montos ni detalles: solo defiere al equipo. El bot no vuelve a hablar del tema.
 const PAYMENT_HANDOFF_MSG = `Gracias 🙏 Le haré saber al equipo de ${process.env.SHOP_NAME || 'TG Motors'} para que revise tu tema de pago directamente contigo. Un asesor te contactará por aquí.`;
 
-// Temas de facturación/cuenta que requieren intervención humana (NO método de pago).
-// Enfocado para evitar falsos positivos como "¿puedo pagar con tarjeta?": la palabra
-// suelta "pago/pagar" NO dispara; sí lo hacen términos de facturación/disputa.
-// Es la CAPA 1 (determinística). La CAPA 2 (tool escalar_pago del LLM) cubre las frases
-// que el regex no atrape; ambas terminan en modo PAUSED y con este mismo mensaje.
+// Regex determinístico para temas de facturación/pago. Pasa a modo PAUSED (silencio del bot).
 const PAYMENT_ISSUE_RE = /retenci[oó]n|comprobante|transferenc|dep[oó]sit|factura|reembolso|nota de venta|\bboleta\b|\bsaldo\b|\bdeuda\b|\babono\b|pago pendiente|pendiente\b[\s\S]{0,15}\bpago\b|pag(?:u[eé]|[oó])\b[\s\S]{0,15}de m[aá]s|cobr\w*[\s\S]{0,15}de m[aá]s/i;
 
 /**
@@ -598,29 +590,8 @@ async function processMessageInner(phone, text, sendFn, meta = {}) {
   const priorMessages    = history?.historial || [];
   const existingRecordId = history?.recordId || null;
 
-  const { reply, usage, isProvider, isPaymentEscalation } = await runTurn(clientRecord, priorMessages, text);
+  const { reply, usage } = await runTurn(clientRecord, priorMessages, text);
   recordTokenUsage(phone, usage.input, usage.output);
-
-  // CAPA 2 — Si el LLM escaló un tema de pago (escalar_pago): ya quedó PAUSED dentro del
-  // tool. Enviamos el mensaje fijo (NO el texto libre del LLM) y cortamos. El bot no vuelve
-  // a responder hasta que el asesor haga #bot <tel>.
-  if (isPaymentEscalation) {
-    await sendFn(PAYMENT_HANDOFF_MSG);
-    console.log('[payment] handoff a humano (PAUSED, LLM) — bot en silencio', { phone });
-    await appendMessage({ telefono: phone, paso: 'pago_humano',
-      servicioElegido: history?.servicioElegido || null,
-      newMessages: [{ role: 'user', content: text }], existingRecordId });
-    return;
-  }
-
-  // Si el LLM detectó un proveedor: ya se avisó al dueño en el tool. NO responder.
-  if (isProvider) {
-    console.log('[provider] detectado por LLM — sin respuesta al proveedor', { phone });
-    await appendMessage({ telefono: phone, paso: 'proveedor',
-      servicioElegido: history?.servicioElegido || null,
-      newMessages: [{ role: 'user', content: text }], existingRecordId });
-    return;
-  }
 
   const finalReply = reply;
 

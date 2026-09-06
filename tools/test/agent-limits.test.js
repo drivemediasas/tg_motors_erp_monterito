@@ -55,7 +55,7 @@ test('mezcla: uno nuevo permitido + uno repetido bloqueado', () => {
   const ran = new Set(['alert_owner']);
   const blocks = [
     { id: 'a', name: 'alert_owner', input: {} },
-    { id: 'b', name: 'consultar_precio', input: {} },
+    { id: 'b', name: 'precio_servicio', input: {} },
   ];
   const { toRun, blocked } = filterRepeatedSideEffects(blocks, ran);
   assert.deepStrictEqual(toRun.map(b => b.id), ['b']);
