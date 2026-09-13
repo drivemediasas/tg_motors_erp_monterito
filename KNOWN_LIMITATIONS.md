@@ -15,15 +15,19 @@ Actualizado: 2026-07-01
 - **No hay número de QA con permisos especiales.** Para probar se usa cualquier número ≠ OWNER_PHONE.
 
 ## Detección de intervención humana
-- **Auto-detección de "respondieron a mano desde la app de WhatsApp" (coexistence): implementada pero
-  APAGADA** (`COEXISTENCE_ECHO_DETECT=off`). El código en `src/handlers/360dialog.js` detecta el
-  saliente del número del taller y distingue el eco del bot del mensaje humano, pero el shape exacto
-  del payload de 360dialog **no está verificado en producción** → activarla a ciegas podría hacer que
-  el bot se silencie a sí mismo. Ver RUNBOOK "Activar detección de respuesta humana".
-- Mecanismos que SÍ funcionan hoy para pasar a modo humano:
+- **Auto-detección de "respondieron a mano desde la app de WhatsApp" (coexistence): ACTIVA**
+  (`COEXISTENCE_ECHO_DETECT` default `on`). Desde 2026-09-13 `src/handlers/360dialog.js` procesa el
+  webhook `smb_message_echoes` (`value.message_echoes[]`, formato oficial Meta/360dialog): cuando la
+  administradora responde a un cliente desde la app, el bot pasa ese cliente a `owner=HUMAN` y calla
+  `HUMAN_TIMEOUT_MIN` (20 min) desde la **última** respuesta humana. Sin comandos.
+- Seguridad contra auto-silencio: los envíos por API no se ecoan (doc oficial) y además se filtran
+  por `id` (`wasSentByBot`) y por texto enviado en los últimos 5 min (`wasTextSentByBot`).
+- Contadores en `/health`: `metrics.humanEchoDetected` y `metrics.botEchoIgnored`.
+- Límite: si la administradora responde y el cliente vuelve a escribir **después** de 20 min de
+  silencio humano, el bot retoma. Subir `HUMAN_TIMEOUT_MIN` si el equipo tarda más en responder.
+- Otros mecanismos para pasar a modo humano:
   - El bot escala solo (cotización/precio) → `WAITING_HUMAN` → queda en silencio.
   - `#humano <telefono>` (tomar) / `#bot <telefono>` (devolver) desde el WhatsApp de Diego.
-  - Reactivación automática por timeout (`HUMAN_TIMEOUT_MIN`, default 20 min).
 
 ## Batching de mensajes rápidos (anti-race)
 - El **lock por teléfono** serializa los mensajes del mismo número (no se corrompe el historial). El **agrupamiento** de varios mensajes en una sola respuesta (`src/batcher.js`) está implementado y probado a nivel unitario, pero **NO cableado** al flujo en vivo (para no añadir latencia). Hoy cada mensaje recibe su respuesta, en orden.

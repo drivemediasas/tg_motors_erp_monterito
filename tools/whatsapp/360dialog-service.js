@@ -20,6 +20,27 @@ function wasSentByBot(id) {
   return !!id && _botSentIds.has(id);
 }
 
+// Segunda barrera: textos que el bot envió en los últimos minutos. Según la doc de
+// Meta/360dialog los envíos por API NO se ecoan en `smb_message_echoes`, pero si
+// alguna vez lo hicieran con otro id, esto evita que el bot se calle a sí mismo.
+const _botSentTexts = new Map(); // text → timestamp ms
+const _BOT_SENT_TEXT_TTL_MS = 5 * 60 * 1000;
+const _BOT_SENT_TEXT_MAX = 500;
+function recordBotSentText(text) {
+  const t = String(text || '').trim();
+  if (!t) return;
+  _botSentTexts.set(t, Date.now());
+  if (_botSentTexts.size > _BOT_SENT_TEXT_MAX) _botSentTexts.delete(_botSentTexts.keys().next().value);
+}
+function wasTextSentByBot(text) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  const ts = _botSentTexts.get(t);
+  if (!ts) return false;
+  if (Date.now() - ts > _BOT_SENT_TEXT_TTL_MS) { _botSentTexts.delete(t); return false; }
+  return true;
+}
+
 // Reintentable: timeout de red o error 5xx del proveedor. Un 4xx (número inválido,
 // fuera de la ventana de 24h, plantilla requerida) NO se reintenta.
 function isRetriableSendError(err) {
@@ -60,6 +81,7 @@ async function sendMessage(phone, text, _attempt = 1) {
     );
     const sentId = response.data?.messages?.[0]?.id;
     recordBotSentId(sentId);
+    recordBotSentText(text);
     console.log('[360dialog] message accepted', { to: phone, messageId: sentId });
     return response.data;
   } catch (err) {
@@ -128,4 +150,6 @@ async function sendTemplate(phone, templateName, params = []) {
   }
 }
 
-module.exports = { sendMessage, sendTemplate, wasSentByBot };
+module.exports = { sendMessage, sendTemplate, wasSentByBot, wasTextSentByBot,
+  // solo para tests
+  __recordBotSentTextForTest: recordBotSentText };

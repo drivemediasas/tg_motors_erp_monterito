@@ -4,12 +4,19 @@ const { getMediaAck } = require('../guards');
 const pool = require('../../tools/db/client');
 const { markProcessedDurable, fallbackId } = require('../../tools/db/messages-processed');
 const { takeOverByHuman } = require('../../tools/db/conversation-state');
+const { bump } = require('../metrics');
 
 const normalizePhone = (p) => String(p || '').replace(/\D/g, '');
 // Detección de "la administradora respondió al cliente desde la app de WhatsApp"
 // (coexistence). ON por defecto: si el equipo responde a un cliente, el bot se
-// calla 20 min para ese cliente (HUMAN_TIMEOUT_MIN). Se distingue del eco de la
-// propia respuesta del bot con wasSentByBot(). Apagable con COEXISTENCE_ECHO_DETECT=off.
+// calla 20 min para ese cliente (HUMAN_TIMEOUT_MIN); cada nueva respuesta humana
+// renueva la ventana. Apagable con COEXISTENCE_ECHO_DETECT=off.
+//
+// Formato real (doc Meta / 360dialog): los mensajes enviados desde la app llegan
+// en un webhook aparte, `field: "smb_message_echoes"`, con `value.message_echoes[]`
+// ({ from: <taller>, to: <cliente>, id, type, text }). Los envíos por la API del
+// bot NO se ecoan ahí; igual se filtran por id (wasSentByBot) y por texto reciente
+// (wasTextSentByBot) como doble seguro para que el bot nunca se calle a sí mismo.
 const ECHO_DETECT_ON = (process.env.COEXISTENCE_ECHO_DETECT || 'on').toLowerCase() !== 'off';
 
 // In-memory dedup cache: prevents double-processing if 360dialog sends the same
@@ -35,7 +42,28 @@ function markProcessed(messageId) {
  */
 function parseD360Payload(body) {
   body = body || {};
-  const value = body.entry?.[0]?.changes?.[0]?.value || {};
+  const change = body.entry?.[0]?.changes?.[0] || {};
+  const value = change.value || {};
+
+  // ── Eco de mensaje enviado desde la app de WhatsApp Business (coexistence) ──
+  // field = "smb_message_echoes" → value.message_echoes[]. Es la administradora
+  // (o alguien del equipo) respondiendo a mano; NO es un cliente escribiendo.
+  const echoes = Array.isArray(value.message_echoes) ? value.message_echoes : null;
+  if (echoes && echoes.length) {
+    const echo = echoes[0];
+    const own = normalizePhone(value.metadata?.display_phone_number);
+    const from = normalizePhone(echo.from);
+    // Si `from` no es el taller (payload inesperado), no asumir nada.
+    if (own && from && from !== own) return { ignore: true, reason: 'echo_from_mismatch' };
+    return {
+      agentOutbound: true,
+      source: change.field || 'smb_message_echoes',
+      messageId: echo.id || null,
+      customer: normalizePhone(echo.to) || null,
+      text: echo.text?.body || '',
+      textSnippet: (echo.text?.body || '').slice(0, 40),
+    };
+  }
 
   // Statuses/delivery receipts no traen "messages" — son eventos salientes, se ignoran
   if (!value.messages || !value.messages.length) {
@@ -64,8 +92,10 @@ function parseD360Payload(body) {
     );
     return {
       agentOutbound: true,
+      source: 'messages',
       messageId,
       customer: customer || null,
+      text: msg.text?.body || '',
       textSnippet: (msg.text?.body || '').slice(0, 40),
     };
   }
@@ -81,9 +111,11 @@ function parseD360Payload(body) {
 
 async function handleD360Inbound(body) {
   // Log a concise summary instead of the full payload to avoid PII in logs
-  const msgCount  = body?.entry?.[0]?.changes?.[0]?.value?.messages?.length || 0;
-  const statCount = body?.entry?.[0]?.changes?.[0]?.value?.statuses?.length || 0;
-  console.log('[360dialog] webhook received', { messages: msgCount, statuses: statCount });
+  const change    = body?.entry?.[0]?.changes?.[0];
+  const msgCount  = change?.value?.messages?.length || 0;
+  const statCount = change?.value?.statuses?.length || 0;
+  const echoCount = change?.value?.message_echoes?.length || 0;
+  console.log('[360dialog] webhook received', { field: change?.field || null, messages: msgCount, statuses: statCount, echoes: echoCount });
 
   let parsed;
   try {
@@ -102,15 +134,17 @@ async function handleD360Inbound(body) {
   if (parsed.agentOutbound) {
     if (!ECHO_DETECT_ON) { console.log('[360dialog] agentOutbound ignorado (detección off)'); return; }
     // Si lo mandó el bot por la API, es solo el eco de nuestra propia respuesta.
-    if (d360Service.wasSentByBot(parsed.messageId)) {
-      console.log('[360dialog] eco de mensaje del bot — ignorado');
+    if (d360Service.wasSentByBot(parsed.messageId) || d360Service.wasTextSentByBot(parsed.text)) {
+      bump('botEchoIgnored');
+      console.log('[360dialog] eco de mensaje del bot — ignorado', { source: parsed.source });
       return;
     }
     // Lo mandó un humano (la administradora) desde la app → callar al bot para ese cliente.
     if (parsed.customer) {
       try {
         await takeOverByHuman(parsed.customer, 'admin', 'HUMAN');
-        console.log('[360dialog] respuesta humana detectada → bot en silencio', { customer: parsed.customer });
+        bump('humanEchoDetected');
+        console.log('[360dialog] respuesta humana detectada → bot en silencio', { customer: parsed.customer, source: parsed.source, minutes: process.env.HUMAN_TIMEOUT_MIN || '20' });
       } catch (e) {
         console.error('[360dialog] no se pudo pasar a HUMAN:', e.message);
       }
