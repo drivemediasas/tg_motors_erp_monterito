@@ -14,6 +14,8 @@ const _counters = {
   groqFallbackUsed: 0,
   outboundRetries: 0,
   turnTimeouts: 0,
+  humanEchoDetected: 0,   // la administradora respondió desde la app → bot en silencio
+  botEchoIgnored: 0,      // eco de un mensaje del propio bot (descartado)
 };
 
 function bump(name, n = 1) {

@@ -53,14 +53,21 @@ Resiliencia (default): `HUMAN_TIMEOUT_MIN=20`, `LOCK_TIMEOUT_MS=90000`, `OWNER_N
 Nota: el seed actualiza cualquier fila existente del mismo celular (compara últimos 9 dígitos), así
 que un proveedor que ya escribió antes y quedó guardado como `0987...` también queda marcado.
 
-## Activar detección de respuesta humana (coexistence)
-1. Con `COEXISTENCE_ECHO_DETECT=on` (default), pedir a alguien que responda a un cliente desde la
-   app de WhatsApp del taller y capturar en `railway logs` la línea `[360dialog] webhook received`
-   y el evento asociado (necesitamos ver `metadata.display_phone_number`, `messages[0].from`,
-   `messages[0].id` y a quién iba dirigido).
-2. Confirmar que el `id` del eco de un mensaje que mandó el bot coincide con el que devolvió la API
-   (si no coincide, hay que ajustar `wasSentByBot`).
-3. Recién ahí: `railway variables --set COEXISTENCE_ECHO_DETECT=on` y subir `HUMAN_TIMEOUT_MIN=60`.
+## Detección de respuesta humana (coexistence) — ACTIVA
+Cuando la administradora responde a un cliente desde la app de WhatsApp, 360dialog manda el webhook
+`smb_message_echoes`; el bot pasa ese cliente a `owner=HUMAN` y calla `HUMAN_TIMEOUT_MIN` (20 min)
+desde la última respuesta humana. No requiere `#humano`.
+
+Verificar tras un deploy (una sola vez):
+1. Pedir que alguien responda a un cliente desde la app. En `railway logs` debe aparecer
+   `[360dialog] webhook received { field: 'smb_message_echoes', echoes: 1 }` seguido de
+   `respuesta humana detectada → bot en silencio`.
+2. Que el cliente escriba de nuevo: el bot NO debe responder (log `[CONTROL] ... human_owner`).
+3. `/health` → `metrics.humanEchoDetected` sube. Si `botEchoIgnored` sube con cada respuesta del
+   bot, 360dialog está ecoando los envíos por API: es inofensivo (se filtran), solo anotarlo.
+Si el paso 1 no muestra `field: 'smb_message_echoes'`, el número no está en modo coexistence en
+360dialog (Hub → número → Coexistence) — revisar ahí antes de tocar código.
+Apagar en emergencia: `railway variables --set COEXISTENCE_ECHO_DETECT=off` + redeploy.
 
 ## Rotar el modelo LLM
 1. Ver modelos vigentes en Groq: https://console.groq.com/docs/models (o `curl https://api.groq.com/openai/v1/models -H "Authorization: Bearer $GROQ_API_KEY"`).
