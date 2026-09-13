@@ -37,6 +37,21 @@ Resiliencia (default): `HUMAN_TIMEOUT_MIN=20`, `LOCK_TIMEOUT_MS=90000`, `OWNER_N
   ver "Activar detección de respuesta humana" abajo.
 - **No hay número de QA con permisos especiales**: para probar, se usa cualquier número que NO sea
   `OWNER_PHONE` y se comporta 100% como cliente.
+- **Proveedores** (`clientes.es_proveedor = true`): el bot **nunca les responde**; solo guarda su
+  mensaje en el historial (paso `proveedor`). La lista maestra vive en
+  `tools/db/seed-proveedores.js` (v1 = 89 contactos del CSV `Proveedores_TG_MOTORS`, 2026-09-12).
+
+## Actualizar la lista de proveedores
+1. Editar `PROVEEDORES` en `tools/db/seed-proveedores.js` (formato `593XXXXXXXXX`; también acepta
+   `09XXXXXXXX`, se normaliza solo).
+2. Subir `SEED_VERSION` (`v1` → `v2`). Sin esto el seed **no** se vuelve a ejecutar.
+3. `npm test` (valida formato, duplicados y que `OWNER_PHONE` no esté en la lista) y deploy.
+   Al arrancar, `runProveedoresSeedOnce` corre el seed una sola vez por versión y lo registra en
+   `_migraciones`. Verificar en `railway logs`: `[seed-proveedores] aplicado (seed_proveedores_vN): N marcados`.
+4. Para un número suelto sin deploy: `#proveedor <tel>` / `#cliente <tel>` desde el chat de Diego.
+
+Nota: el seed actualiza cualquier fila existente del mismo celular (compara últimos 9 dígitos), así
+que un proveedor que ya escribió antes y quedó guardado como `0987...` también queda marcado.
 
 ## Activar detección de respuesta humana (coexistence)
 1. Con `COEXISTENCE_ECHO_DETECT=on` (default), pedir a alguien que responda a un cliente desde la
