@@ -58,6 +58,16 @@ test('targetMatches=false → ERROR', () => {
   assert.strictEqual(shouldBotRespond({ ...base, targetMatches: false }).decision, 'ERROR');
 });
 
+// interruptor global apagado → ALLOW_HUMAN sin importar el resto del contexto
+test('botEnabled=false → ALLOW_HUMAN (bot_disabled), incluso con owner=BOT', () => {
+  const r = shouldBotRespond({ ...base, botEnabled: false });
+  assert.strictEqual(r.decision, 'ALLOW_HUMAN');
+  assert.strictEqual(r.reason, 'bot_disabled');
+});
+test('botEnabled=true (default) → sigue respondiendo normal', () => {
+  assert.strictEqual(shouldBotRespond({ ...base }).decision, 'ALLOW_BOT');
+});
+
 // Comandos del asesor
 test('comando #humano 593xxxx → take con target', () => {
   const c = parseAdvisorCommand('#humano 593987654321');

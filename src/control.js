@@ -15,6 +15,9 @@ const HUMAN_TIMEOUT_MIN = parseInt(process.env.HUMAN_TIMEOUT_MIN || '20', 10);
 // Pausa por tema de pago (modo PAUSED): se auto-reactiva pasado este lapso, asumiendo
 // que para entonces el equipo ya resolvió el tema. Configurable en Railway.
 const PAUSED_TIMEOUT_HOURS = parseInt(process.env.PAUSED_TIMEOUT_HOURS || '48', 10);
+// Interruptor global: en 'false' el bot nunca responde automáticamente en ninguna
+// conversación (operación 100% manual). El webhook sigue recibiendo/logueando mensajes.
+const BOT_ENABLED = process.env.BOT_ENABLED !== 'false';
 
 /**
  * @param {object} ctx
@@ -30,15 +33,20 @@ const PAUSED_TIMEOUT_HOURS = parseInt(process.env.PAUSED_TIMEOUT_HOURS || '48', 
  * @param {number}  [ctx.humanTimeoutMin]
  * @param {number}  [ctx.pausedTimeoutHours]
  * @param {boolean} [ctx.targetMatches=true] - sanity: destino == teléfono del contexto
+ * @param {boolean} [ctx.botEnabled] - interruptor global (default: env BOT_ENABLED)
  * @returns {{decision:string, reason:string, humanActive:boolean}}
  */
 function shouldBotRespond(ctx = {}) {
   const timeoutMin = ctx.humanTimeoutMin != null ? ctx.humanTimeoutMin : HUMAN_TIMEOUT_MIN;
+  const botEnabled = ctx.botEnabled != null ? ctx.botEnabled : BOT_ENABLED;
 
   // Humano activo = owner HUMAN y con actividad dentro de la ventana de timeout.
   const humanActive = ctx.ownerType === 'HUMAN'
     && ctx.lastHumanActivityMs != null
     && (ctx.nowMs - ctx.lastHumanActivityMs) <= timeoutMin * 60 * 1000;
+
+  // 0. Interruptor global apagado → modo 100% manual, nunca responder.
+  if (!botEnabled) return { decision: 'ALLOW_HUMAN', reason: 'bot_disabled', humanActive };
 
   // 1. SAFE MODE → no responder
   if (ctx.safeMode) return { decision: 'ALLOW_HUMAN', reason: 'safe_mode', humanActive };
@@ -84,4 +92,4 @@ function parseAdvisorCommand(text) {
   return null;
 }
 
-module.exports = { shouldBotRespond, parseAdvisorCommand, HUMAN_TIMEOUT_MIN, PAUSED_TIMEOUT_HOURS };
+module.exports = { shouldBotRespond, parseAdvisorCommand, HUMAN_TIMEOUT_MIN, PAUSED_TIMEOUT_HOURS, BOT_ENABLED };
